@@ -1,0 +1,36 @@
+# Binaries
+*.o
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+/bin/
+/dist/
+
+# eBPF generated files (keep source, ignore generated)
+*_bpfeb.go
+*_bpfel.go
+*_bpfeb.o
+*_bpfel.o
+
