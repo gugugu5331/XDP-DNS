@@ -9,6 +9,21 @@
 - **高吞吐**: 支持百万级 PPS 的 DNS 查询处理能力
 - **灵活过滤**: 支持基于域名、IP、查询类型的动态过滤规则
 - **Prometheus 监控**: 内置指标导出，支持 Grafana 可视化
+- **混合架构**: C++ 高性能数据面 + Go 灵活管理面
+
+## 📊 性能亮点 (混合架构)
+
+| 指标 | 纯 Go | 混合架构 | 提升 |
+|------|-------|---------|------|
+| **DNS 解析** | 770 ns | **12 ns** | **64x** |
+| **NXDOMAIN 响应** | 1226 ns | **24 ns** | **51x** |
+| **A 记录响应** | 2205 ns | **3.5 ns** | **630x** |
+| **端到端 (Block)** | 2125 ns | **724 ns** | **2.9x** |
+| **端到端 (Redirect)** | 3174 ns | **~800 ns** | **4.0x** |
+| **内存分配 (Block)** | 35 allocs | **8 allocs** | **-77%** |
+| **吞吐量 (单核)** | ~500K PPS | **~1.4M PPS** | **3x** |
+
+详见 [HYBRID_ARCHITECTURE.md](HYBRID_ARCHITECTURE.md) 和 [性能报告](tests/benchmark/results/BENCHMARK_REPORT.md)
 
 ## 架构
 
@@ -47,6 +62,21 @@
 
 ### 构建
 
+#### 方式 1: 混合架构 (推荐高性能场景)
+
+```bash
+# 1. 构建 C++ 库
+cd cpp/build
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)
+cd ../..
+
+# 2. 构建 Go 应用
+go build -o dns-filter ./cmd/dns-filter
+```
+
+#### 方式 2: 传统方式
+
 ```bash
 # 克隆项目
 git clone <repository-url>
@@ -58,6 +88,8 @@ make build
 # 或仅构建 Go 程序
 make build-go
 ```
+
+> **性能对比**: 混合架构比纯 Go 快 1.2-4x，推荐用于高流量场景（>1M PPS）
 
 ### 配置
 
@@ -122,18 +154,39 @@ sudo journalctl -u xdp-dns-filter -f
 
 ```
 xdp-dns/
-├── cmd/dns-filter/      # 主程序入口
+├── cpp/                      # C++ 高性能数据面 ⭐
+│   ├── include/xdp_dns/     # 头文件和 C 接口
+│   ├── src/                 # C++ 实现 (DNS 解析, 响应构建)
+│   ├── tests/               # C++ 单元测试
+│   └── build/               # CMake 编译输出
+│
 ├── pkg/
-│   ├── dns/             # DNS 协议解析
-│   ├── filter/          # 过滤引擎
-│   ├── config/          # 配置管理
-│   └── metrics/         # 指标收集
-├── internal/worker/     # Worker 处理池
-├── bpf/                 # eBPF/XDP 程序
-├── xdp/                 # XDP Socket 封装
-├── configs/             # 配置文件
-└── scripts/             # 构建脚本
+│   ├── dns/
+│   │   ├── cppbridge/       # CGO 绑定到 C++ ⭐
+│   │   ├── hybrid/          # 混合处理器 ⭐
+│   │   ├── parser.go        # Go DNS 解析器
+│   │   └── response.go      # Go 响应构建
+│   ├── filter/              # 过滤引擎 (Go Trie)
+│   ├── config/              # 配置管理
+│   └── metrics/             # 指标收集
+│
+├── tests/benchmark/         # 性能对比测试 ⭐
+│   ├── e2e_benchmark_test.go
+│   ├── run_benchmark.sh
+│   └── results/             # 性能报告
+│
+├── cmd/dns-filter/          # 主程序入口
+├── internal/worker/         # Worker 处理池
+├── bpf/                     # eBPF/XDP 程序
+├── xdp/                     # XDP Socket 封装
+├── configs/                 # 配置文件
+├── scripts/                 # 构建脚本
+│
+├── HYBRID_ARCHITECTURE.md   # 混合架构文档 ⭐
+└── README.md
 ```
+
+⭐ 标记的是新增用于混合架构的文件/目录
 
 ## 监控
 
@@ -146,6 +199,26 @@ xdp-dns/
 
 ## 开发
 
+### 混合架构测试
+
+```bash
+# C++ 单元测试
+cd cpp/build && ./xdp_dns_tests
+
+# C++ 性能基准测试
+./xdp_dns_benchmark
+
+# Go 基准测试 (需要 C++ 库)
+export LD_LIBRARY_PATH=$PWD/../cpp/build
+go test -bench=. ./pkg/dns/hybrid/
+go test -bench=. ./tests/benchmark/
+
+# 完整对比测试
+./tests/benchmark/run_benchmark.sh
+```
+
+### 常规测试
+
 ```bash
 # 运行测试
 make test
@@ -156,6 +229,12 @@ make bench
 # 代码格式化
 make fmt
 ```
+
+## 文档
+
+- [HYBRID_ARCHITECTURE.md](HYBRID_ARCHITECTURE.md) - 混合架构详细设计文档
+- [性能报告](tests/benchmark/results/BENCHMARK_REPORT.md) - 完整的性能对比分析
+- [docs/](docs/) - 其他技术文档
 
 ## License
 
