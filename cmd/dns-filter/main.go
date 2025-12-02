@@ -21,8 +21,8 @@ import (
 )
 
 var (
-	configPath = flag.String("config", "configs/config.yaml", "Path to config file")
-	version    = flag.Bool("version", false, "Show version")
+	configPath   = flag.String("config", "configs/config.yaml", "Path to config file")
+	version      = flag.Bool("version", false, "Show version")
 	buildVersion = "dev"
 )
 
@@ -142,9 +142,8 @@ func main() {
 
 	// 打印统计信息
 	stats := metricsCollector.GetStats()
-	log.Printf("Final stats: received=%d, allowed=%d, blocked=%d, redirected=%d, dropped=%d",
-		stats.Received, stats.Allowed, stats.Blocked, stats.Redirected, stats.Dropped)
+	log.Printf("Final stats: received=%d, allowed=%d (normal), blocked=%d (threat), logged=%d (suspicious), dropped=%d",
+		stats.Received, stats.Allowed, stats.Blocked, stats.Logged, stats.Dropped)
 
-	log.Println("XDP DNS Filter stopped.")
+	log.Println("XDP DNS Threat Analyzer stopped.")
 }
-

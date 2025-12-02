@@ -1,63 +1,71 @@
-# DNS 过滤规则配置
+# DNS 威胁流量分析规则配置
+#
+# 动作类型:
+#   - block: 标记为威胁流量 (恶意域名)
+#   - log: 标记为可疑流量 (需要进一步分析)
+#   - allow: 正常流量 (默认)
 
 rules:
-  # 广告域名黑名单
-  - id: block-ads
+  # 恶意软件 C2 服务器域名
+  - id: threat-malware-c2
     priority: 100
     enabled: true
     action: block
-    description: "Block advertising domains"
+    description: "Known malware C2 domains"
+    domains:
+      - "*.malware.com"
+      - "*.malicious.org"
+      - "*.botnet.net"
+      - "*.ransomware.io"
+
+  # 钓鱼网站域名
+  - id: threat-phishing
+    priority: 95
+    enabled: true
+    action: block
+    description: "Known phishing domains"
+    domains:
+      - "*.phishing.net"
+      - "*.fake-login.com"
+      - "*.credential-harvest.org"
+
+  # 广告追踪域名 (可选阻止)
+  - id: threat-ads-tracking
+    priority: 80
+    enabled: true
+    action: block
+    description: "Advertising and tracking domains"
     domains:
       - "*.doubleclick.net"
       - "*.googlesyndication.com"
       - "*.googleadservices.com"
       - "*.google-analytics.com"
-      - "*.adsserver.com"
-      - "ads.*.com"
 
-  # 恶意软件域名黑名单
-  - id: block-malware
-    priority: 90
-    enabled: true
-    action: block
-    description: "Block malware domains"
-    domains:
-      - "*.malware.com"
-      - "*.malicious.org"
-      - "*.phishing.net"
-
-  # 重定向规则示例 - 将内部域名重定向到内部服务器
-  - id: redirect-internal
-    priority: 80
-    enabled: false
-    action: redirect
-    redirect_ip: "192.168.1.100"
-    redirect_ttl: 300
-    description: "Redirect internal domains"
-    domains:
-      - "internal.company.com"
-      - "*.internal.local"
-
-  # 日志规则 - 记录可疑的 TXT 和 ANY 查询
-  - id: log-suspicious
-    priority: 50
+  # 可疑的 DNS 隧道 (TXT/ANY 查询)
+  - id: suspicious-tunnel
+    priority: 70
     enabled: true
     action: log
-    description: "Log suspicious query types"
+    description: "Potential DNS tunneling (TXT/ANY queries)"
     query_types:
       - TXT
       - ANY
     domains:
       - "*"
 
-# IP 黑名单 (CIDR 格式)
-ip_blacklist:
-  - "10.0.0.0/8"
-  - "192.168.100.0/24"
+  # 可疑的动态 DNS
+  - id: suspicious-dyndns
+    priority: 60
+    enabled: true
+    action: log
+    description: "Dynamic DNS domains (often used by malware)"
+    domains:
+      - "*.dyndns.org"
+      - "*.no-ip.com"
+      - "*.ddns.net"
 
-# 速率限制配置
-rate_limits:
-  - source: "0.0.0.0/0"
-    queries_per_second: 100
-    burst: 200
+# IP 黑名单 (在 XDP 层实现)
+ip_blacklist:
+  - "10.0.0.0/8"       # 示例: 阻止特定内网段
+  - "192.168.100.0/24" # 示例: 阻止特定子网
 

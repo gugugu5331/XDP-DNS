@@ -1,53 +1,77 @@
-# XDP DNS Filter
+# XDP DNS Threat Analyzer
 
-高性能 DNS 流量过滤系统，基于 XDP (eXpress Data Path) 和 AF_XDP Socket 技术实现。
+高性能 DNS 威胁流量分析系统，基于 XDP (eXpress Data Path) 和 AF_XDP Socket 技术实现。
+
+## 系统目标
+
+**DNS 威胁流量分析** - 实时检测和识别 DNS 层面的安全威胁，包括：
+- 恶意软件 C2 (Command & Control) 域名
+- 钓鱼网站域名
+- DNS 隧道可疑流量
+- 广告追踪域名
+
+## 核心流程
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        DNS 威胁流量分析核心流程                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌──────────┐ │
+│  │  网卡驱动   │───▶│  XDP 程序   │───▶│ AF_XDP      │───▶│ 用户态   │ │
+│  │  (NIC)     │    │ DNS 过滤    │    │ 零拷贝重定向 │    │ 分析程序 │ │
+│  └─────────────┘    └─────────────┘    └─────────────┘    └──────────┘ │
+│         │                 │                   │                 │       │
+│    收到数据包      检测 DNS 端口      bpf_redirect_map()   解析 + 匹配  │
+│                   (UDP 53)           共享内存传递          威胁规则     │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
 ## 特性
 
-- **超低延迟**: 在网卡驱动层处理数据包，绕过内核网络栈
-- **零拷贝**: 使用 AF_XDP Socket 实现用户态零拷贝数据包处理
-- **高吞吐**: 支持百万级 PPS 的 DNS 查询处理能力
-- **灵活过滤**: 支持基于域名、IP、查询类型的动态过滤规则
-- **Prometheus 监控**: 内置指标导出，支持 Grafana 可视化
-- **混合架构**: C++ 高性能数据面 + Go 灵活管理面
+- **超低延迟**: XDP 在网卡驱动层拦截数据包，绕过内核网络栈
+- **零拷贝**: AF_XDP Socket 实现用户态零拷贝数据包处理
+- **高吞吐**: 支持百万级 PPS 的 DNS 流量分析能力
+- **威胁检测**: 基于规则的域名威胁匹配 (精确匹配 + 通配符)
+- **Prometheus 监控**: 内置威胁检测指标导出
+- **混合架构**: C++ 高性能解析 + Go 灵活规则引擎
 
-## 📊 性能亮点 (混合架构)
+## 📊 性能指标
 
-| 指标 | 纯 Go | 混合架构 | 提升 |
-|------|-------|---------|------|
-| **DNS 解析** | 770 ns | **12 ns** | **64x** |
-| **NXDOMAIN 响应** | 1226 ns | **24 ns** | **51x** |
-| **A 记录响应** | 2205 ns | **3.5 ns** | **630x** |
-| **端到端 (Block)** | 2125 ns | **724 ns** | **2.9x** |
-| **端到端 (Redirect)** | 3174 ns | **~800 ns** | **4.0x** |
-| **内存分配 (Block)** | 35 allocs | **8 allocs** | **-77%** |
-| **吞吐量 (单核)** | ~500K PPS | **~1.4M PPS** | **3x** |
-
-详见 [HYBRID_ARCHITECTURE.md](HYBRID_ARCHITECTURE.md) 和 [性能报告](tests/benchmark/results/BENCHMARK_REPORT.md)
+| 指标 | 性能 | 说明 |
+|------|------|------|
+| **DNS 解析** | 12 ns (C++) / 770 ns (Go) | 从数据包提取域名 |
+| **规则匹配** | ~200 ns | Trie 树匹配 1000+ 规则 |
+| **端到端检测** | ~300-800 ns | 解析 + 威胁检测 |
+| **吞吐量 (单核)** | ~1.4M PPS | 威胁检测吞吐 |
+| **吞吐量 (8核)** | ~8M PPS | 多核并行分析 |
 
 ## 架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     User Space (Go)                              │
+│                     User Space (Go/C++)                        │
 │  ┌───────────┐  ┌────────────┐  ┌───────────┐  ┌────────────┐   │
-│  │ Config    │  │ DNS Parser │  │ Filter    │  │ Metrics    │   │
-│  │ Manager   │  │            │  │ Engine    │  │ Collector  │   │
+│  │ Config    │  │ DNS Parser │  │ Threat    │  │ Metrics    │   │
+│  │ Manager   │  │ (C++/Go)   │  │ Detector  │  │ Collector  │   │
 │  └───────────┘  └────────────┘  └───────────┘  └────────────┘   │
 │                              │                                   │
 │  ┌───────────────────────────▼─────────────────────────────────┐│
 │  │                  AF_XDP Socket (Zero-Copy)                  ││
-│  │    Fill Ring │ Completion Ring │ RX Ring │ TX Ring          ││
+│  │         Fill Ring │ RX Ring │ 共享内存 UMEM                 ││
 │  └─────────────────────────────────────────────────────────────┘│
 └──────────────────────────────────────────────────────────────────┘
                                │
                        ┌───────▼───────┐
                        │   eBPF Maps   │
+                       │  (xsks_map)   │
                        └───────────────┘
                                │
 ┌──────────────────────────────▼──────────────────────────────────┐
 │                   Kernel Space (XDP/eBPF)                        │
-│     Parse ETH → Parse IP → Parse UDP → Check DNS → Redirect     │
+│  Parse ETH → Parse IP → Parse UDP → Check DNS → bpf_redirect    │
+│                                       Port 53    to AF_XDP      │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -115,17 +139,27 @@ metrics:
   listen: ":9090"
 ```
 
-编辑过滤规则 `configs/rules.yaml`:
+编辑威胁检测规则 `configs/rules.yaml`:
 
 ```yaml
+# 动作类型: block (威胁), log (可疑), allow (正常)
 rules:
-  - id: block-ads
+  # 恶意软件 C2 域名
+  - id: threat-malware-c2
     priority: 100
     enabled: true
     action: block
     domains:
-      - "*.ads.com"
-      - "*.doubleclick.net"
+      - "*.malware.com"
+      - "*.botnet.net"
+
+  # 可疑 DNS 隧道 (TXT 查询)
+  - id: suspicious-tunnel
+    priority: 70
+    enabled: true
+    action: log
+    query_types: [TXT, ANY]
+    domains: ["*"]
 ```
 
 ### 运行
@@ -154,39 +188,30 @@ sudo journalctl -u xdp-dns-filter -f
 
 ```
 xdp-dns/
-├── cpp/                      # C++ 高性能数据面 ⭐
-│   ├── include/xdp_dns/     # 头文件和 C 接口
-│   ├── src/                 # C++ 实现 (DNS 解析, 响应构建)
-│   ├── tests/               # C++ 单元测试
-│   └── build/               # CMake 编译输出
+├── bpf/                     # XDP/eBPF 程序 (内核层 DNS 过滤)
+│   ├── xdp_dns_filter.c    # XDP 程序: DNS 端口检测 + AF_XDP 重定向
+│   └── xdp_dns_filter.h    # 共享数据结构
+│
+├── xdp/                     # AF_XDP Socket 封装
+│   ├── xdp.go              # Socket 创建和配置
+│   ├── program.go          # XDP 程序加载
+│   └── socket.go           # 零拷贝收发
 │
 ├── pkg/
-│   ├── dns/
-│   │   ├── cppbridge/       # CGO 绑定到 C++ ⭐
-│   │   ├── hybrid/          # 混合处理器 ⭐
-│   │   ├── parser.go        # Go DNS 解析器
-│   │   └── response.go      # Go 响应构建
-│   ├── filter/              # 过滤引擎 (Go Trie)
-│   ├── config/              # 配置管理
-│   └── metrics/             # 指标收集
+│   ├── dns/                # DNS 解析 (只解析，不构建响应)
+│   │   ├── parser.go       # Go DNS 解析器
+│   │   ├── cppbridge/      # C++ 高性能解析绑定
+│   │   └── hybrid/         # 混合架构处理器
+│   ├── filter/             # 威胁检测引擎
+│   │   ├── engine.go       # 规则匹配 (Trie)
+│   │   └── types.go        # Action: block/log/allow
+│   └── metrics/            # 威胁检测指标
 │
-├── tests/benchmark/         # 性能对比测试 ⭐
-│   ├── e2e_benchmark_test.go
-│   ├── run_benchmark.sh
-│   └── results/             # 性能报告
-│
+├── internal/worker/         # 数据包处理池
 ├── cmd/dns-filter/          # 主程序入口
-├── internal/worker/         # Worker 处理池
-├── bpf/                     # eBPF/XDP 程序
-├── xdp/                     # XDP Socket 封装
-├── configs/                 # 配置文件
-├── scripts/                 # 构建脚本
-│
-├── HYBRID_ARCHITECTURE.md   # 混合架构文档 ⭐
-└── README.md
+├── configs/                 # 配置和规则文件
+└── tests/                   # 性能测试
 ```
-
-⭐ 标记的是新增用于混合架构的文件/目录
 
 ## 监控
 
@@ -194,8 +219,9 @@ xdp-dns/
 
 主要指标:
 - `xdp_dns_packets_received_total` - 接收的 DNS 包总数
-- `xdp_dns_packets_blocked_total` - 阻止的 DNS 包总数
-- `xdp_dns_packets_allowed_total` - 允许的 DNS 包总数
+- `xdp_dns_packets_blocked_total` - 威胁流量 (被检测阻止)
+- `xdp_dns_packets_logged_total` - 可疑流量 (记录分析)
+- `xdp_dns_packets_allowed_total` - 正常流量
 
 ## 开发
 

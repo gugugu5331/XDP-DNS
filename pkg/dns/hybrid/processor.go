@@ -1,37 +1,38 @@
-// Package hybrid 实现混合架构 DNS 处理器
+// Package hybrid 实现混合架构 DNS 威胁流量分析处理器
 //
 // 架构:
 // ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
 // │ DNS Packet  │────▶│  C++ Parse  │────▶│  Go Match   │
 // └─────────────┘     │   (12ns)    │     │  (187ns)    │
-//                     └─────────────┘     └──────┬──────┘
-//                                                │
-//                     ┌─────────────┐     ┌──────▼──────┐
-//                     │  C++ Build  │◀────│   Action    │
-//                     │   (4ns)     │     │  Decision   │
-//                     └─────────────┘     └─────────────┘
 //
+//	└─────────────┘     └──────┬──────┘
+//	                           │
+//	                    ┌──────▼──────┐
+//	                    │   Threat    │
+//	                    │  Detection  │
+//	                    └─────────────┘
+//
+// 威胁分析系统只检测，不构建响应
 // 总延迟: ~200ns, 吞吐量: ~5M PPS
 package hybrid
 
 import (
-	"encoding/binary"
 	"sync"
 
 	"xdp-dns/pkg/dns/cppbridge"
 	"xdp-dns/pkg/filter"
 )
 
-// Processor 混合架构 DNS 处理器
+// Processor 混合架构威胁分析处理器
 type Processor struct {
 	engine *filter.Engine
 	mu     sync.RWMutex
 
 	// 统计
 	processed   uint64
-	allowed     uint64
-	blocked     uint64
-	redirected  uint64
+	allowed     uint64 // 正常流量
+	blocked     uint64 // 威胁流量
+	logged      uint64 // 可疑流量
 	parseErrors uint64
 }
 
@@ -60,8 +61,8 @@ type ProcessResult struct {
 	RuleID   string
 }
 
-// Process 处理 DNS 数据包
-// 返回处理结果和响应数据(如果需要)
+// Process 处理 DNS 数据包进行威胁分析
+// 返回检测结果 (威胁分析系统不构建响应)
 func (p *Processor) Process(packet []byte) (*ProcessResult, error) {
 	// Step 1: C++ 高性能解析 (12ns)
 	parsed, err := cppbridge.Parse(packet)
@@ -86,42 +87,16 @@ func (p *Processor) Process(packet []byte) (*ProcessResult, error) {
 		RuleID: result.RuleID,
 	}
 
-	// Step 3: C++ 高性能响应构建 (4-29ns)
+	// 威胁检测统计 (不构建响应)
 	switch result.Action {
 	case filter.ActionAllow:
-		p.allowed++
-		// 不需要构建响应
+		p.allowed++ // 正常流量
 
 	case filter.ActionBlock:
-		p.blocked++
-		// 构建 NXDOMAIN 响应
-		pr.Response, err = cppbridge.BuildNXDomain(packet)
-		if err != nil {
-			return nil, err
-		}
-
-	case filter.ActionRedirect:
-		p.redirected++
-		// 构建重定向响应
-		if result.RedirectIP != nil {
-			if len(result.RedirectIP) == 4 {
-				// IPv4
-				ip := binary.BigEndian.Uint32(result.RedirectIP)
-				pr.Response, err = cppbridge.BuildAResponse(packet, ip, result.TTL)
-			} else if len(result.RedirectIP) == 16 {
-				// IPv6
-				var ipv6 [16]byte
-				copy(ipv6[:], result.RedirectIP)
-				pr.Response, err = cppbridge.BuildAAAAResponse(packet, ipv6, result.TTL)
-			}
-			if err != nil {
-				return nil, err
-			}
-		}
+		p.blocked++ // 威胁流量
 
 	case filter.ActionLog:
-		p.allowed++
-		// 记录但放行
+		p.logged++ // 可疑流量
 	}
 
 	return pr, nil
@@ -132,24 +107,21 @@ func (p *Processor) Stats() ProcessorStats {
 	cppStats := cppbridge.GetStats()
 
 	return ProcessorStats{
-		Processed:       p.processed,
-		Allowed:         p.allowed,
-		Blocked:         p.blocked,
-		Redirected:      p.redirected,
-		ParseErrors:     p.parseErrors,
-		CPPParseCount:   cppStats.PacketsParsed,
-		CPPResponseBuilt: cppStats.ResponseBuilt,
+		Processed:     p.processed,
+		Allowed:       p.allowed,
+		Blocked:       p.blocked,
+		Logged:        p.logged,
+		ParseErrors:   p.parseErrors,
+		CPPParseCount: cppStats.PacketsParsed,
 	}
 }
 
-// ProcessorStats 处理器统计
+// ProcessorStats 威胁分析处理器统计
 type ProcessorStats struct {
-	Processed        uint64
-	Allowed          uint64
-	Blocked          uint64
-	Redirected       uint64
-	ParseErrors      uint64
-	CPPParseCount    uint64
-	CPPResponseBuilt uint64
+	Processed     uint64 // 总处理数
+	Allowed       uint64 // 正常流量
+	Blocked       uint64 // 威胁流量
+	Logged        uint64 // 可疑流量
+	ParseErrors   uint64 // 解析错误
+	CPPParseCount uint64 // C++ 解析计数
 }
-

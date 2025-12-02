@@ -1,3 +1,5 @@
+// Package worker 提供数据包处理工作池
+// 用于 DNS 威胁流量分析系统
 package worker
 
 import (
@@ -100,76 +102,38 @@ func extractDNSPayload(data []byte) ([]byte, *PacketInfo, error) {
 	return data[dnsOffset:dnsEnd], info, nil
 }
 
-// handleAction 处理过滤动作
-func (p *Pool) handleAction(pkt Packet, msg *dns.Message, action filter.Action,
+// handleAction 处理检测动作
+// 威胁流量分析系统只记录和统计，不构建响应
+func (p *Pool) handleAction(msg *dns.Message, action filter.Action,
 	rule *filter.Rule, pktInfo *PacketInfo, metricsCollector *metrics.Collector) {
 
 	switch action {
 	case filter.ActionAllow:
+		// 正常流量 - 仅统计
 		if metricsCollector != nil {
 			metricsCollector.IncAllowed()
 		}
 
 	case filter.ActionBlock:
-		// 生成 NXDOMAIN 响应
-		response := dns.BuildNXDomainResponse(msg)
-		if response != nil {
-			p.sendResponse(pkt, response, pktInfo)
-		}
+		// 威胁流量 - 记录并统计
 		if metricsCollector != nil {
 			metricsCollector.IncBlocked()
 		}
 		if rule != nil {
-			log.Printf("Blocked: %s (rule: %s)", msg.GetQueryDomain(), rule.ID)
-		}
-
-	case filter.ActionRedirect:
-		// 生成重定向响应
-		if rule != nil && rule.RedirectIP != nil {
-			var response []byte
-			if msg.GetQueryType() == dns.TypeAAAA {
-				response = dns.BuildAAAAResponse(msg, rule.RedirectIP, rule.RedirectTTL)
-			} else {
-				response = dns.BuildAResponse(msg, rule.RedirectIP, rule.RedirectTTL)
-			}
-			if response != nil {
-				p.sendResponse(pkt, response, pktInfo)
-			}
-		}
-		if metricsCollector != nil {
-			metricsCollector.IncRedirected()
+			log.Printf("THREAT DETECTED: domain=%s rule=%s src=%s type=%s",
+				msg.GetQueryDomain(), rule.ID, pktInfo.SrcIP,
+				dns.TypeName(msg.GetQueryType()))
 		}
 
 	case filter.ActionLog:
-		log.Printf("Logged: %s type=%s from=%s",
+		// 可疑流量 - 记录详细信息
+		log.Printf("SUSPICIOUS: domain=%s src=%s:%d dst=%s:%d type=%s",
 			msg.GetQueryDomain(),
-			dns.TypeName(msg.GetQueryType()),
-			pktInfo.SrcIP)
+			pktInfo.SrcIP, pktInfo.SrcPort,
+			pktInfo.DstIP, pktInfo.DstPort,
+			dns.TypeName(msg.GetQueryType()))
 		if metricsCollector != nil {
 			metricsCollector.IncLogged()
 		}
 	}
-}
-
-// sendResponse 发送响应
-func (p *Pool) sendResponse(pkt Packet, dnsResponse []byte, pktInfo *PacketInfo) {
-	responsePkt, err := buildResponsePacket(pkt.Data, dnsResponse, pktInfo)
-	if err != nil {
-		log.Printf("Failed to build response: %v", err)
-		return
-	}
-
-	// 获取 TX 描述符
-	txDescs := p.options.Socket.GetDescs(1, false)
-	if len(txDescs) == 0 {
-		return
-	}
-
-	// 复制响应数据到 TX 缓冲区
-	frame := p.options.Socket.GetFrame(txDescs[0])
-	copy(frame, responsePkt)
-	txDescs[0].Len = uint32(len(responsePkt))
-
-	// 发送
-	p.options.Socket.Transmit(txDescs)
 }

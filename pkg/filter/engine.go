@@ -1,8 +1,8 @@
+// Package filter 提供 DNS 威胁域名过滤引擎
 package filter
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"sort"
 	"strings"
@@ -78,25 +78,17 @@ func (e *Engine) convertRuleConfig(rc RuleConfig) Rule {
 		Priority:    rc.Priority,
 		Enabled:     rc.Enabled,
 		Domains:     rc.Domains,
-		RedirectTTL: rc.RedirectTTL,
 		Description: rc.Description,
 	}
 
-	// 转换动作
+	// 转换动作 (威胁分析只支持: allow, block, log)
 	switch strings.ToLower(rc.Action) {
 	case "block":
 		rule.Action = ActionBlock
-	case "redirect":
-		rule.Action = ActionRedirect
 	case "log":
 		rule.Action = ActionLog
 	default:
 		rule.Action = ActionAllow
-	}
-
-	// 转换重定向IP
-	if rc.RedirectIP != "" {
-		rule.RedirectIP = net.ParseIP(rc.RedirectIP)
 	}
 
 	// 转换查询类型
@@ -117,10 +109,6 @@ func (e *Engine) convertRuleConfig(rc RuleConfig) Rule {
 		case "ANY":
 			rule.QueryTypes = append(rule.QueryTypes, dns.TypeANY)
 		}
-	}
-
-	if rule.RedirectTTL == 0 {
-		rule.RedirectTTL = 300 // 默认 5 分钟
 	}
 
 	return rule
@@ -174,7 +162,7 @@ func (e *Engine) Check(msg *dns.Message, srcIP string) (Action, *Rule) {
 	return ActionAllow, nil
 }
 
-// CheckDomain 检查域名 - 用于混合架构
+// CheckDomain 检查域名 - 用于威胁流量分析
 // 接收已解析的域名和查询类型，返回匹配结果
 func (e *Engine) CheckDomain(domain string, qtype uint16) (*CheckResult, error) {
 	atomic.AddUint64(&e.stats.TotalChecks, 1)
@@ -187,11 +175,9 @@ func (e *Engine) CheckDomain(domain string, qtype uint16) (*CheckResult, error) 
 		if e.matchQueryType(rule, qtype) {
 			e.updateStats(rule.Action)
 			return &CheckResult{
-				Action:     rule.Action,
-				Rule:       rule,
-				RuleID:     rule.ID,
-				RedirectIP: rule.RedirectIP,
-				TTL:        rule.RedirectTTL,
+				Action: rule.Action,
+				Rule:   rule,
+				RuleID: rule.ID,
 			}, nil
 		}
 	}
@@ -206,11 +192,9 @@ func (e *Engine) CheckDomain(domain string, qtype uint16) (*CheckResult, error) 
 			if e.matchQueryType(rule, qtype) {
 				e.updateStats(rule.Action)
 				return &CheckResult{
-					Action:     rule.Action,
-					Rule:       rule,
-					RuleID:     rule.ID,
-					RedirectIP: rule.RedirectIP,
-					TTL:        rule.RedirectTTL,
+					Action: rule.Action,
+					Rule:   rule,
+					RuleID: rule.ID,
 				}, nil
 			}
 		}
@@ -269,8 +253,6 @@ func (e *Engine) updateStats(action Action) {
 	switch action {
 	case ActionBlock:
 		atomic.AddUint64(&e.stats.Blocked, 1)
-	case ActionRedirect:
-		atomic.AddUint64(&e.stats.Redirected, 1)
 	case ActionLog:
 		atomic.AddUint64(&e.stats.Logged, 1)
 	default:
@@ -316,7 +298,6 @@ func (e *Engine) GetStats() EngineStats {
 		TotalChecks: atomic.LoadUint64(&e.stats.TotalChecks),
 		Allowed:     atomic.LoadUint64(&e.stats.Allowed),
 		Blocked:     atomic.LoadUint64(&e.stats.Blocked),
-		Redirected:  atomic.LoadUint64(&e.stats.Redirected),
 		Logged:      atomic.LoadUint64(&e.stats.Logged),
 	}
 }

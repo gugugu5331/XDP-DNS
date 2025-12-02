@@ -1,0 +1,6 @@
+goos: linux
+goarch: amd64
+pkg: xdp-dns/pkg/dns
+cpu: 13th Gen Intel(R) Core(TM) i7-1360P
+BenchmarkDNSParse-16              	 1549033	      2162 ns/op	     312 B/op	       9 allocs/op
+BenchmarkDNSParse-16              	

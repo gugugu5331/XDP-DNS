@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	// DNS 数据包指标
+	// DNS 威胁流量分析指标
 	packetsReceived = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "xdp_dns_packets_received_total",
 		Help: "Total DNS packets received",
@@ -20,17 +20,17 @@ var (
 
 	packetsAllowed = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "xdp_dns_packets_allowed_total",
-		Help: "Total DNS packets allowed",
+		Help: "Total normal DNS packets (allowed)",
 	})
 
 	packetsBlocked = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "xdp_dns_packets_blocked_total",
-		Help: "Total DNS packets blocked",
+		Help: "Total threat DNS packets (blocked)",
 	})
 
-	packetsRedirected = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "xdp_dns_packets_redirected_total",
-		Help: "Total DNS packets redirected",
+	packetsLogged = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "xdp_dns_packets_logged_total",
+		Help: "Total suspicious DNS packets (logged)",
 	})
 
 	packetsDropped = prometheus.NewCounter(prometheus.CounterOpts{
@@ -59,7 +59,7 @@ var (
 	// 规则统计
 	rulesTotal = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "xdp_dns_rules_total",
-		Help: "Total number of filter rules",
+		Help: "Total number of threat detection rules",
 	})
 )
 
@@ -69,7 +69,7 @@ func init() {
 		packetsReceived,
 		packetsAllowed,
 		packetsBlocked,
-		packetsRedirected,
+		packetsLogged,
 		packetsDropped,
 		parseErrors,
 		packetLatency,
@@ -107,8 +107,8 @@ func (e *Exporter) Start() error {
 		if e.collector != nil {
 			stats := e.collector.GetStats()
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"received":%d,"allowed":%d,"blocked":%d,"redirected":%d,"dropped":%d}`,
-				stats.Received, stats.Allowed, stats.Blocked, stats.Redirected, stats.Dropped)
+			fmt.Fprintf(w, `{"received":%d,"allowed":%d,"blocked":%d,"logged":%d,"dropped":%d}`,
+				stats.Received, stats.Allowed, stats.Blocked, stats.Logged, stats.Dropped)
 		}
 	})
 
@@ -139,7 +139,7 @@ func (e *Exporter) UpdateMetrics() {
 	packetsReceived.Add(float64(stats.Received))
 	packetsAllowed.Add(float64(stats.Allowed))
 	packetsBlocked.Add(float64(stats.Blocked))
-	packetsRedirected.Add(float64(stats.Redirected))
+	packetsLogged.Add(float64(stats.Logged))
 	packetsDropped.Add(float64(stats.Dropped))
 	parseErrors.Add(float64(stats.ParseErrors))
 }
@@ -168,4 +168,3 @@ func SetRulesTotal(count int) {
 func ObserveLatency(duration time.Duration) {
 	packetLatency.Observe(duration.Seconds())
 }
-

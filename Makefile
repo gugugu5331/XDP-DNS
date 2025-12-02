@@ -6,7 +6,7 @@ BINARY := dns-filter
 INTERFACE ?= eth0
 CPP_BUILD_DIR := cpp/build
 
-.PHONY: all build clean test install run help build-cpp
+.PHONY: all build clean test install run help build-cpp test-xdp-setup test-dnsperf test-xdp-full test-xdp-quick test-threat
 
 all: build
 
@@ -105,24 +105,59 @@ test-cpp:
 clean-cpp:
 	@rm -rf $(CPP_BUILD_DIR)
 
+# XDP 测试目标
+test-xdp-setup:
+	@echo "Checking XDP setup..."
+	@./tests/benchmark/check_xdp_support.sh
+
+# 使用 dnsperf 测试 XDP（需要系统已运行）
+test-dnsperf:
+	@echo "Running dnsperf traffic generation..."
+	@cd tests/benchmark && ./run_dnsperf.sh 8.8.8.8 10 1000 5
+
+# 完整 XDP 测试流程（需要 root）
+test-xdp-full: build
+	@echo "Running full XDP test flow..."
+	@sudo ./tests/benchmark/test_full_flow.sh $(INTERFACE) 8.8.8.8 30
+
+# 快速 XDP 测试（10秒）
+test-xdp-quick: build
+	@echo "Running quick XDP test..."
+	@sudo ./tests/benchmark/test_full_flow.sh $(INTERFACE) 8.8.8.8 10
+
+# 威胁检测逻辑测试（不需要 XDP）
+test-threat:
+	@echo "Testing threat detection logic..."
+	@cd tests/benchmark && go test -v -run TestThreatDetection
+
 # 帮助
 help:
-	@echo "XDP DNS Filter - Build System"
+	@echo "XDP DNS Threat Analyzer - Build System"
 	@echo ""
-	@echo "Usage:"
+	@echo "Build Commands:"
 	@echo "  make build          - Build everything (BPF + Go)"
 	@echo "  make build-go       - Build Go binary only"
 	@echo "  make build-bpf      - Build BPF program only"
 	@echo "  make build-cpp      - Build C++ core library"
 	@echo "  make build-with-cpp - Build Go with C++ optimizations"
+	@echo ""
+	@echo "Test Commands:"
 	@echo "  make test           - Run all tests"
 	@echo "  make unit-test      - Run Go unit tests"
 	@echo "  make test-cpp       - Run C++ tests"
+	@echo "  make test-threat    - Test threat detection logic"
 	@echo "  make bench          - Run benchmarks"
+	@echo ""
+	@echo "XDP Test Commands (require root):"
+	@echo "  make test-xdp-setup - Check XDP support"
+	@echo "  make test-xdp-quick - Quick XDP test (10s)"
+	@echo "  make test-xdp-full  - Full XDP test (30s)"
+	@echo "  make test-dnsperf   - Generate DNS traffic with dnsperf"
+	@echo ""
+	@echo "Other Commands:"
 	@echo "  make lint           - Run code linting"
 	@echo "  make fmt            - Format code"
 	@echo "  make clean          - Clean build artifacts"
-	@echo "  make clean-cpp      - Clean C++ build"
 	@echo "  make install        - Install to system (requires root)"
 	@echo "  make uninstall      - Uninstall from system"
 	@echo "  make run            - Build and run (dev mode)"

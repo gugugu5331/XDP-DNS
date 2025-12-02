@@ -60,32 +60,17 @@ func BenchmarkDNSParseLongDomain(b *testing.B) {
 	}
 }
 
-// BenchmarkBuildNXDomain NXDOMAIN响应构建
-func BenchmarkBuildNXDomain(b *testing.B) {
-	packet := buildTestQuery("blocked.example.com")
+// BenchmarkDNSParseAndExtract 解析并提取域名
+func BenchmarkDNSParseAndExtract(b *testing.B) {
+	packet := buildTestQuery("malware.threat.example.com")
 	parser := NewParser()
-	msg, _ := parser.Parse(packet)
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		_ = BuildNXDomainResponse(msg)
+		msg, _ := parser.Parse(packet)
+		_ = msg.GetQueryDomain()
+		_ = msg.GetQueryType()
 	}
 }
-
-// BenchmarkBuildAResponse A记录响应构建
-func BenchmarkBuildAResponse(b *testing.B) {
-	packet := buildTestQuery("redirect.example.com")
-	parser := NewParser()
-	msg, _ := parser.Parse(packet)
-	ip := []byte{192, 168, 1, 100}
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for i := 0; i < b.N; i++ {
-		_ = BuildAResponse(msg, ip, 300)
-	}
-}
-

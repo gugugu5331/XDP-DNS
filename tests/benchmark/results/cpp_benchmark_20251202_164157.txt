@@ -1,0 +1,61 @@
+2025-12-02T16:41:57+08:00
+Running ./xdp_dns_benchmark
+Run on (16 X 2611.21 MHz CPU s)
+CPU Caches:
+  L1 Data 48 KiB (x8)
+  L1 Instruction 32 KiB (x8)
+  L2 Unified 1280 KiB (x8)
+  L3 Unified 18432 KiB (x1)
+Load Average: 0.60, 0.27, 0.20
+--------------------------------------------------------------------------------------
+Benchmark                            Time             CPU   Iterations UserCounters...
+--------------------------------------------------------------------------------------
+BM_DNSParse                       8.04 ns         8.04 ns    105915159 items_per_second=124.4M/s
+BM_DNSParse                       9.78 ns         9.78 ns    105915159 items_per_second=102.293M/s
+BM_DNSParse                       9.67 ns         9.67 ns    105915159 items_per_second=103.418M/s
+BM_DNSParse_mean                  9.16 ns         9.16 ns            3 items_per_second=110.037M/s
+BM_DNSParse_median                9.67 ns         9.67 ns            3 items_per_second=103.418M/s
+BM_DNSParse_stddev               0.975 ns        0.974 ns            3 items_per_second=12.4512M/s
+BM_DNSParse_cv                   10.64 %         10.63 %             3 items_per_second=11.32%
+BM_DNSDecodeName                  46.9 ns         46.9 ns     14718487 items_per_second=21.3342M/s
+BM_DNSDecodeName                  42.4 ns         42.4 ns     14718487 items_per_second=23.6005M/s
+BM_DNSDecodeName                  38.8 ns         38.8 ns     14718487 items_per_second=25.7491M/s
+BM_DNSDecodeName_mean             42.7 ns         42.7 ns            3 items_per_second=23.5613M/s
+BM_DNSDecodeName_median           42.4 ns         42.4 ns            3 items_per_second=23.6005M/s
+BM_DNSDecodeName_stddev           4.03 ns         4.03 ns            3 items_per_second=2.20773M/s
+BM_DNSDecodeName_cv               9.43 %          9.43 %             3 items_per_second=9.37%
+BM_DNSDomainEquals                55.8 ns         55.8 ns     12656417 items_per_second=17.9268M/s
+BM_DNSDomainEquals                71.6 ns         71.6 ns     12656417 items_per_second=13.9666M/s
+BM_DNSDomainEquals                71.3 ns         71.3 ns     12656417 items_per_second=14.0275M/s
+BM_DNSDomainEquals_mean           66.2 ns         66.2 ns            3 items_per_second=15.307M/s
+BM_DNSDomainEquals_median         71.3 ns         71.3 ns            3 items_per_second=14.0275M/s
+BM_DNSDomainEquals_stddev         9.04 ns         9.04 ns            3 items_per_second=2.26902M/s
+BM_DNSDomainEquals_cv            13.65 %         13.66 %             3 items_per_second=14.82%
+BM_TrieMatch                       262 ns          262 ns      2280781 items_per_second=3.81696M/s
+BM_TrieMatch                       308 ns          308 ns      2280781 items_per_second=3.25192M/s
+BM_TrieMatch                       404 ns          404 ns      2280781 items_per_second=2.47413M/s
+BM_TrieMatch_mean                  325 ns          325 ns            3 items_per_second=3.181M/s
+BM_TrieMatch_median                308 ns          308 ns            3 items_per_second=3.25192M/s
+BM_TrieMatch_stddev               72.6 ns         72.6 ns            3 items_per_second=674.218k/s
+BM_TrieMatch_cv                  22.37 %         22.37 %             3 items_per_second=21.20%
+BM_TrieMatchWildcard               265 ns          265 ns      2357167 items_per_second=3.77368M/s
+BM_TrieMatchWildcard               260 ns          260 ns      2357167 items_per_second=3.85268M/s
+BM_TrieMatchWildcard               281 ns          281 ns      2357167 items_per_second=3.56189M/s
+BM_TrieMatchWildcard_mean          268 ns          268 ns            3 items_per_second=3.72942M/s
+BM_TrieMatchWildcard_median        265 ns          265 ns            3 items_per_second=3.77368M/s
+BM_TrieMatchWildcard_stddev       11.0 ns         11.0 ns            3 items_per_second=150.363k/s
+BM_TrieMatchWildcard_cv           4.10 %          4.10 %             3 items_per_second=4.03%
+BM_BuildNXDomain                  18.9 ns         18.9 ns     39689569 items_per_second=52.9703M/s
+BM_BuildNXDomain                  17.4 ns         17.4 ns     39689569 items_per_second=57.4309M/s
+BM_BuildNXDomain                  17.6 ns         17.6 ns     39689569 items_per_second=56.6798M/s
+BM_BuildNXDomain_mean             18.0 ns         18.0 ns            3 items_per_second=55.6937M/s
+BM_BuildNXDomain_median           17.6 ns         17.6 ns            3 items_per_second=56.6798M/s
+BM_BuildNXDomain_stddev          0.788 ns        0.788 ns            3 items_per_second=2.38821M/s
+BM_BuildNXDomain_cv               4.39 %          4.39 %             3 items_per_second=4.29%
+BM_BuildAResponse                 4.81 ns         4.81 ns    203878155 items_per_second=207.781M/s
+BM_BuildAResponse                 5.21 ns         5.21 ns    203878155 items_per_second=191.766M/s
+BM_BuildAResponse                 5.88 ns         5.88 ns    203878155 items_per_second=170.05M/s
+BM_BuildAResponse_mean            5.30 ns         5.30 ns            3 items_per_second=189.866M/s
+BM_BuildAResponse_median          5.21 ns         5.21 ns            3 items_per_second=191.766M/s
+BM_BuildAResponse_stddev         0.539 ns        0.539 ns            3 items_per_second=18.9372M/s
+BM_BuildAResponse_cv             10.17 %         10.17 %             3 items_per_second=9.97%

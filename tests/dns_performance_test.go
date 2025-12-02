@@ -162,47 +162,49 @@ func BenchmarkBatchProcessing(b *testing.B) {
 	}
 }
 
-// BenchmarkResponseBuilding 响应构建测试
-func BenchmarkResponseBuilding(b *testing.B) {
-	packet := buildFullDNSPacket("blocked.example.com")
+// BenchmarkThreatDetection 威胁检测完整流程测试
+func BenchmarkThreatDetection(b *testing.B) {
+	packet := buildFullDNSPacket("malware.example.com")
 	parser := dns.NewParser()
-	dnsPayload := extractDNSPayload(packet)
-	msg, _ := parser.Parse(dnsPayload)
 
-	b.Run("NXDOMAIN", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			_ = dns.BuildNXDomainResponse(msg)
-		}
+	engine, _ := filter.NewEngine("")
+	engine.AddRule(filter.Rule{
+		ID:       "threat-malware",
+		Priority: 100,
+		Enabled:  true,
+		Action:   filter.ActionBlock,
+		Domains:  []string{"*.malware.com", "malware.example.com"},
 	})
 
-	b.Run("ARecord", func(b *testing.B) {
-		ip := []byte{127, 0, 0, 1}
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			_ = dns.BuildAResponse(msg, ip, 300)
-		}
-	})
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		dnsPayload := extractDNSPayload(packet)
+		msg, _ := parser.Parse(dnsPayload)
+		_, _ = engine.Check(msg, "192.168.1.100")
+	}
 }
 
-// TestDNSPerformanceSummary 性能总结测试
-func TestDNSPerformanceSummary(t *testing.T) {
+// TestThreatAnalysisPerformance DNS威胁流量分析性能测试
+func TestThreatAnalysisPerformance(t *testing.T) {
 	iterations := 100000
 	packet := buildFullDNSPacket("test.example.com")
 	parser := dns.NewParser()
 
+	// 创建威胁检测引擎，加载1000条规则
 	engine, _ := filter.NewEngine("")
 	for i := 0; i < 1000; i++ {
 		engine.AddRule(filter.Rule{
-			ID:       fmt.Sprintf("rule_%d", i),
+			ID:       fmt.Sprintf("threat_%d", i),
 			Priority: i,
 			Enabled:  true,
 			Action:   filter.ActionBlock,
-			Domains:  []string{fmt.Sprintf("domain%d.example.com", i)},
+			Domains:  []string{fmt.Sprintf("malware%d.example.com", i)},
 		})
 	}
 
-	// 测试 1: 纯 DNS 解析
+	// 测试 1: DNS 解析性能
 	start := time.Now()
 	for i := 0; i < iterations; i++ {
 		dnsPayload := extractDNSPayload(packet)
@@ -211,7 +213,7 @@ func TestDNSPerformanceSummary(t *testing.T) {
 	parseTime := time.Since(start)
 	parseNsPerOp := float64(parseTime.Nanoseconds()) / float64(iterations)
 
-	// 测试 2: 解析 + 过滤
+	// 测试 2: 威胁检测性能 (解析 + 规则匹配)
 	dnsPayload := extractDNSPayload(packet)
 	msg, _ := parser.Parse(dnsPayload)
 
@@ -219,31 +221,22 @@ func TestDNSPerformanceSummary(t *testing.T) {
 	for i := 0; i < iterations; i++ {
 		_, _ = engine.Check(msg, "192.168.1.100")
 	}
-	filterTime := time.Since(start)
-	filterNsPerOp := float64(filterTime.Nanoseconds()) / float64(iterations)
+	detectTime := time.Since(start)
+	detectNsPerOp := float64(detectTime.Nanoseconds()) / float64(iterations)
 
-	// 测试 3: 响应构建
-	start = time.Now()
-	for i := 0; i < iterations; i++ {
-		_ = dns.BuildNXDomainResponse(msg)
-	}
-	buildTime := time.Since(start)
-	buildNsPerOp := float64(buildTime.Nanoseconds()) / float64(iterations)
-
-	// 计算吞吐量
-	totalNsPerOp := parseNsPerOp + filterNsPerOp + buildNsPerOp
+	// 计算吞吐量 (威胁分析只需解析+检测)
+	totalNsPerOp := parseNsPerOp + detectNsPerOp
 	pps := 1e9 / totalNsPerOp
 
 	fmt.Println()
 	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
-	fmt.Println("║              DNS 流量分析性能测试结果                         ║")
+	fmt.Println("║              DNS 威胁流量分析性能测试                          ║")
 	fmt.Println("╠══════════════════════════════════════════════════════════════╣")
 	fmt.Printf("║  测试迭代次数: %d                                       ║\n", iterations)
-	fmt.Printf("║  规则数量: 1000                                              ║\n")
+	fmt.Printf("║  威胁规则数量: 1000                                           ║\n")
 	fmt.Println("╠══════════════════════════════════════════════════════════════╣")
 	fmt.Printf("║  DNS 解析:      %8.1f ns/op  (%7.2f M/s)                ║\n", parseNsPerOp, 1e3/parseNsPerOp)
-	fmt.Printf("║  规则匹配:      %8.1f ns/op  (%7.2f M/s)                ║\n", filterNsPerOp, 1e3/filterNsPerOp)
-	fmt.Printf("║  响应构建:      %8.1f ns/op  (%7.2f M/s)                ║\n", buildNsPerOp, 1e3/buildNsPerOp)
+	fmt.Printf("║  威胁检测:      %8.1f ns/op  (%7.2f M/s)                ║\n", detectNsPerOp, 1e3/detectNsPerOp)
 	fmt.Println("╠══════════════════════════════════════════════════════════════╣")
 	fmt.Printf("║  端到端总计:    %8.1f ns/op                              ║\n", totalNsPerOp)
 	fmt.Printf("║  预估吞吐量:    %8.0f PPS (单核)                         ║\n", pps)

@@ -1,0 +1,71 @@
+# DNS 威胁流量分析规则配置
+#
+# 动作类型:
+#   - block: 标记为威胁流量 (恶意域名)
+#   - log: 标记为可疑流量 (需要进一步分析)
+#   - allow: 正常流量 (默认)
+
+rules:
+  # 恶意软件 C2 服务器域名
+  - id: threat-malware-c2
+    priority: 100
+    enabled: true
+    action: block
+    description: "Known malware C2 domains"
+    domains:
+      - "*.malware.com"
+      - "*.malicious.org"
+      - "*.botnet.net"
+      - "*.ransomware.io"
+
+  # 钓鱼网站域名
+  - id: threat-phishing
+    priority: 95
+    enabled: true
+    action: block
+    description: "Known phishing domains"
+    domains:
+      - "*.phishing.net"
+      - "*.fake-login.com"
+      - "*.credential-harvest.org"
+
+  # 广告追踪域名 (可选阻止)
+  - id: threat-ads-tracking
+    priority: 80
+    enabled: true
+    action: block
+    description: "Advertising and tracking domains"
+    domains:
+      - "*.doubleclick.net"
+      - "*.googlesyndication.com"
+      - "*.googleadservices.com"
+      - "*.google-analytics.com"
+
+  # 可疑的 DNS 隧道 (TXT/ANY 查询)
+  - id: suspicious-tunnel
+    priority: 70
+    enabled: true
+    action: log
+    description: "Potential DNS tunneling (TXT/ANY queries)"
+    query_types:
+      - TXT
+      - ANY
+    domains:
+      - "*"
+
+  # 可疑的动态 DNS
+  - id: suspicious-dyndns
+    priority: 60
+    enabled: true
+    action: log
+    description: "Dynamic DNS domains (often used by malware)"
+    domains:
+      - "*.dyndns.org"
+      - "*.no-ip.com"
+      - "*.ddns.net"
+
+# IP 黑名单 (在 XDP 层实现)
+ip_blacklist:
+  - "10.0.0.0/8"       # 示例: 阻止特定内网段
+  - "192.168.100.0/24" # 示例: 阻止特定子网
+

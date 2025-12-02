@@ -56,20 +56,20 @@ func TestEngine_Check(t *testing.T) {
 func TestDomainTrie(t *testing.T) {
 	trie := NewDomainTrie()
 
-	rule1 := &Rule{ID: "rule1", Action: ActionBlock}
-	rule2 := &Rule{ID: "rule2", Action: ActionRedirect}
+	rule1 := &Rule{ID: "threat-malware", Action: ActionBlock}
+	rule2 := &Rule{ID: "suspicious-log", Action: ActionLog}
 
-	trie.Insert("example.com", rule1)
-	trie.Insert("*.test.com", rule2)
+	trie.Insert("malware.com", rule1)
+	trie.Insert("*.suspicious.com", rule2)
 
 	tests := []struct {
 		domain string
 		wantID string
 	}{
-		{"example.com", "rule1"},
-		{"www.test.com", "rule2"},
-		{"sub.test.com", "rule2"},
-		{"unknown.com", ""},
+		{"malware.com", "threat-malware"},
+		{"www.suspicious.com", "suspicious-log"},
+		{"sub.suspicious.com", "suspicious-log"},
+		{"safe.com", ""},
 	}
 
 	for _, tt := range tests {

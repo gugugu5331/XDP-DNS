@@ -51,19 +51,19 @@ func BenchmarkGoE2E_Allow(b *testing.B) {
 	}
 }
 
-// BenchmarkGoE2E_Block 纯 Go 端到端 - 阻止 + 响应构建
-func BenchmarkGoE2E_Block(b *testing.B) {
+// BenchmarkGoE2E_ThreatDetect 威胁检测 - 检测到威胁
+func BenchmarkGoE2E_ThreatDetect(b *testing.B) {
 	engine, _ := filter.NewEngine("")
 	engine.AddRule(filter.Rule{
-		ID:       "block",
+		ID:       "threat-malware",
 		Priority: 100,
 		Enabled:  true,
 		Action:   filter.ActionBlock,
-		Domains:  []string{"*.block.com"},
+		Domains:  []string{"*.malware.com"},
 	})
 
 	parser := dns.NewParser()
-	packet := buildE2ETestQuery("test.block.com")
+	packet := buildE2ETestQuery("c2.malware.com")
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -71,36 +71,32 @@ func BenchmarkGoE2E_Block(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		msg, _ := parser.Parse(packet)
 		action, _ := engine.Check(msg, "192.168.1.1")
-		if action == filter.ActionBlock {
-			_ = dns.BuildNXDomainResponse(msg)
-		}
+		// 威胁分析系统只检测，不构建响应
+		_ = action
 	}
 }
 
-// BenchmarkGoE2E_Redirect 纯 Go 端到端 - 重定向 + 响应构建
-func BenchmarkGoE2E_Redirect(b *testing.B) {
+// BenchmarkGoE2E_SuspiciousLog 可疑流量检测 - 记录日志
+func BenchmarkGoE2E_SuspiciousLog(b *testing.B) {
 	engine, _ := filter.NewEngine("")
 	engine.AddRule(filter.Rule{
-		ID:         "redirect",
-		Priority:   100,
-		Enabled:    true,
-		Action:     filter.ActionRedirect,
-		Domains:    []string{"*.redirect.com"},
-		RedirectIP: []byte{192, 168, 1, 100},
+		ID:       "suspicious-dyndns",
+		Priority: 100,
+		Enabled:  true,
+		Action:   filter.ActionLog,
+		Domains:  []string{"*.dyndns.org"},
 	})
 
 	parser := dns.NewParser()
-	packet := buildE2ETestQuery("test.redirect.com")
+	packet := buildE2ETestQuery("host.dyndns.org")
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
 		msg, _ := parser.Parse(packet)
-		action, rule := engine.Check(msg, "192.168.1.1")
-		if action == filter.ActionRedirect && rule != nil {
-			_ = dns.BuildAResponse(msg, rule.RedirectIP, rule.RedirectTTL)
-		}
+		action, _ := engine.Check(msg, "192.168.1.1")
+		_ = action
 	}
 }
 

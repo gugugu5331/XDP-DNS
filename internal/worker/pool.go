@@ -167,7 +167,8 @@ func (p *Pool) processPacket(pkt Packet, parser *dns.Parser,
 
 	action, rule := engine.Check(msg, pktInfo.SrcIP)
 
-	p.handleAction(pkt, msg, action, rule, pktInfo, metricsCollector)
+	// 处理检测结果 (威胁分析只记录，不响应)
+	p.handleAction(msg, action, rule, pktInfo, metricsCollector)
 }
 
 // Wait 等待所有 worker 完成
