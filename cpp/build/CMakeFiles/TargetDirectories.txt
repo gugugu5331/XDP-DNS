@@ -1,0 +1,11 @@
+/home/lxx/work/xdp-dns/cpp/build/CMakeFiles/xdp_dns_core.dir
+/home/lxx/work/xdp-dns/cpp/build/CMakeFiles/xdp_dns.dir
+/home/lxx/work/xdp-dns/cpp/build/CMakeFiles/xdp_dns_tests.dir
+/home/lxx/work/xdp-dns/cpp/build/CMakeFiles/xdp_dns_benchmark.dir
+/home/lxx/work/xdp-dns/cpp/build/CMakeFiles/test.dir
+/home/lxx/work/xdp-dns/cpp/build/CMakeFiles/edit_cache.dir
+/home/lxx/work/xdp-dns/cpp/build/CMakeFiles/rebuild_cache.dir
+/home/lxx/work/xdp-dns/cpp/build/CMakeFiles/list_install_components.dir
+/home/lxx/work/xdp-dns/cpp/build/CMakeFiles/install.dir
+/home/lxx/work/xdp-dns/cpp/build/CMakeFiles/install/local.dir
+/home/lxx/work/xdp-dns/cpp/build/CMakeFiles/install/strip.dir

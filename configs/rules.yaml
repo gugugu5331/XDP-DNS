@@ -1,0 +1,63 @@
+# DNS 过滤规则配置
+
+rules:
+  # 广告域名黑名单
+  - id: block-ads
+    priority: 100
+    enabled: true
+    action: block
+    description: "Block advertising domains"
+    domains:
+      - "*.doubleclick.net"
+      - "*.googlesyndication.com"
+      - "*.googleadservices.com"
+      - "*.google-analytics.com"
+      - "*.adsserver.com"
+      - "ads.*.com"
+
+  # 恶意软件域名黑名单
+  - id: block-malware
+    priority: 90
+    enabled: true
+    action: block
+    description: "Block malware domains"
+    domains:
+      - "*.malware.com"
+      - "*.malicious.org"
+      - "*.phishing.net"
+
+  # 重定向规则示例 - 将内部域名重定向到内部服务器
+  - id: redirect-internal
+    priority: 80
+    enabled: false
+    action: redirect
+    redirect_ip: "192.168.1.100"
+    redirect_ttl: 300
+    description: "Redirect internal domains"
+    domains:
+      - "internal.company.com"
+      - "*.internal.local"
+
+  # 日志规则 - 记录可疑的 TXT 和 ANY 查询
+  - id: log-suspicious
+    priority: 50
+    enabled: true
+    action: log
+    description: "Log suspicious query types"
+    query_types:
+      - TXT
+      - ANY
+    domains:
+      - "*"
+
+# IP 黑名单 (CIDR 格式)
+ip_blacklist:
+  - "10.0.0.0/8"
+  - "192.168.100.0/24"
+
+# 速率限制配置
+rate_limits:
+  - source: "0.0.0.0/0"
+    queries_per_second: 100
+    burst: 200
+

@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG CMakeFiles/xdp_dns_benchmark.dir/tests/benchmark_test.cpp.o -o xdp_dns_benchmark  libxdp_dns_core.a /usr/lib/x86_64-linux-gnu/libbenchmark_main.a /usr/lib/x86_64-linux-gnu/libbenchmark.so.1.6.1 

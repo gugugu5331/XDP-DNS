@@ -1,0 +1,11 @@
+prefix=/usr/local
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: xdp_dns
+Description: XDP DNS Filter C++ Core Library
+Version: 1.0.0
+Libs: -L${libdir} -lxdp_dns
+Cflags: -I${includedir}
+

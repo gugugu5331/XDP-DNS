@@ -1,0 +1,50 @@
+# XDP DNS Filter 配置文件
+
+# 网络接口配置
+interface: eth0
+queue_id: 0
+queue_count: 4
+
+# BPF 程序路径
+bpf_path: bpf/xdp_dns_filter_bpfel.o
+
+# AF_XDP Socket 配置
+xdp:
+  num_frames: 4096
+  frame_size: 2048
+  fill_ring_size: 2048
+  comp_ring_size: 2048
+  rx_ring_size: 2048
+  tx_ring_size: 2048
+
+# Worker 配置
+workers:
+  num_workers: 8      # 0 表示使用 CPU 核心数
+  batch_size: 64
+
+# DNS 配置
+dns:
+  listen_ports:
+    - 53
+    - 5353
+  upstream_servers:
+    - 8.8.8.8:53
+    - 8.8.4.4:53
+  cache_size: 10000
+  cache_ttl: 300s
+
+# 过滤规则配置
+rules_path: configs/rules.yaml
+
+# 监控配置
+metrics:
+  enabled: true
+  listen: ":9090"
+  path: /metrics
+
+# 日志配置
+logging:
+  level: info
+  format: json
+  output: stdout
+

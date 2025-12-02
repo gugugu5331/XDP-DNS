@@ -1,0 +1,2 @@
+/usr/bin/ar qc libxdp_dns_core.a CMakeFiles/xdp_dns_core.dir/src/dns_parser.cpp.o CMakeFiles/xdp_dns_core.dir/src/domain_trie.cpp.o CMakeFiles/xdp_dns_core.dir/src/filter_engine.cpp.o
+/usr/bin/ranlib libxdp_dns_core.a
