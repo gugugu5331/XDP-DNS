@@ -22,6 +22,7 @@ import (
 
 var (
 	configPath   = flag.String("config", "configs/config.yaml", "Path to config file")
+	bpfPath      = flag.String("bpf", "", "Path to BPF program (use DNS filter if specified)")
 	version      = flag.Bool("version", false, "Show version")
 	buildVersion = "dev"
 )
@@ -54,10 +55,40 @@ func main() {
 
 	log.Printf("Using interface: %s (index: %d)", cfg.Interface, ifindex)
 
+	// 确定 BPF 程序路径
+	bpfProgPath := *bpfPath
+	if bpfProgPath == "" {
+		bpfProgPath = cfg.BPFPath
+	}
+
 	// 创建 XDP 程序
-	program, err := xdp.NewProgram(cfg.QueueCount)
-	if err != nil {
-		log.Fatalf("Failed to create XDP program: %v", err)
+	var program *xdp.Program
+	if bpfProgPath != "" {
+		// 使用真正的 DNS 过滤程序（只拦截 DNS 端口 53）
+		log.Printf("Loading DNS filter BPF program from: %s", bpfProgPath)
+		program, err = xdp.LoadDNSFilterProgram(bpfProgPath)
+		if err != nil {
+			log.Fatalf("Failed to load DNS filter program: %v", err)
+		}
+
+		// 设置 DNS 端口
+		dnsPorts := []uint16{53} // 默认只监听端口 53
+		if len(cfg.DNS.ListenPorts) > 0 {
+			dnsPorts = cfg.DNS.ListenPorts
+		}
+		if err := program.SetDNSPorts(dnsPorts); err != nil {
+			log.Fatalf("Failed to set DNS ports: %v", err)
+		}
+		log.Printf("DNS ports configured: %v", dnsPorts)
+		log.Printf("NOTE: Only UDP port 53 traffic will be intercepted. SSH and other traffic will PASS through.")
+	} else {
+		// 使用简单的 XDP 程序（重定向所有流量）
+		log.Printf("Using simple XDP program (redirects ALL traffic on queue %d)", cfg.QueueID)
+		log.Printf("WARNING: This may affect SSH if on the same queue!")
+		program, err = xdp.NewProgram(cfg.QueueCount)
+		if err != nil {
+			log.Fatalf("Failed to create XDP program: %v", err)
+		}
 	}
 	defer program.Close()
 
@@ -86,11 +117,20 @@ func main() {
 	defer socket.Close()
 
 	// 注册 socket 到 XDP 程序
+	log.Printf("Registering socket FD=%d to queue %d...", socket.FD(), cfg.QueueID)
 	if err := program.Register(cfg.QueueID, socket.FD()); err != nil {
 		log.Fatalf("Failed to register socket: %v", err)
 	}
 
-	log.Printf("XDP socket created and registered")
+	log.Printf("XDP socket created and registered (queue=%d, fd=%d)", cfg.QueueID, socket.FD())
+
+	// 验证注册是否成功
+	if program.Queues != nil {
+		var val uint32
+		if err := program.Queues.Lookup(uint32(cfg.QueueID), &val); err == nil {
+			log.Printf("Verification: qidconf_map[%d] = %d", cfg.QueueID, val)
+		}
+	}
 
 	// 初始化过滤引擎
 	filterEngine, err := filter.NewEngine(cfg.RulesPath)

@@ -19,7 +19,7 @@ build:
 build-go:
 	@echo "Building Go binary..."
 	@mkdir -p $(BUILD_DIR)
-	@go build -ldflags="-s -w" -o $(BUILD_DIR)/$(BINARY) ./cmd/dns-filter
+	@go build -buildvcs=false -ldflags="-s -w" -o $(BUILD_DIR)/$(BINARY) ./cmd/dns-filter
 	@cp -r configs $(BUILD_DIR)/
 
 # 构建 C++ 核心库
