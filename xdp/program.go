@@ -3,51 +3,51 @@ package xdp
 import (
 	"fmt"
 	"time"
-	"unsafe"
 
 	"github.com/cilium/ebpf"
-	"github.com/cilium/ebpf/asm"
 	"github.com/vishvananda/netlink"
 )
 
-// Program represents the necessary data structures for a simple XDP program that can filter traffic
-// based on the attached rx queue.
+// Program 表示 XDP DNS 过滤程序及其关联的 BPF maps
+// 该程序只拦截指定端口的 DNS (UDP) 流量，其他流量直接放行
 type Program struct {
 	Program  *ebpf.Program
-	Queues   *ebpf.Map // qidconf_map
-	Sockets  *ebpf.Map // xsks_map
-	DNSPorts *ebpf.Map // dns_ports_map (可选，用于 DNS 过滤程序)
-	Metrics  *ebpf.Map // metrics_map (可选)
+	Queues   *ebpf.Map // qidconf_map - 队列配置
+	Sockets  *ebpf.Map // xsks_map - AF_XDP socket 映射
+	DNSPorts *ebpf.Map // dns_ports_map - DNS 端口过滤
+	Metrics  *ebpf.Map // metrics_map - 统计指标 (可选)
 }
 
-// Attach the XDP Program to an interface.
-func (p *Program) Attach(Ifindex int) error {
-	if err := removeProgram(Ifindex); err != nil {
+// Attach 将 XDP 程序附加到网络接口
+func (p *Program) Attach(ifindex int) error {
+	if err := removeProgram(ifindex); err != nil {
 		return err
 	}
-	return attachProgram(Ifindex, p.Program)
+	return attachProgram(ifindex, p.Program)
 }
 
-// Detach the XDP Program from an interface.
-func (p *Program) Detach(Ifindex int) error {
-	return removeProgram(Ifindex)
+// Detach 从网络接口分离 XDP 程序
+func (p *Program) Detach(ifindex int) error {
+	return removeProgram(ifindex)
 }
 
-// Register adds the socket file descriptor as the recipient for packets from the given queueID.
+// Register 注册 AF_XDP socket 到指定队列
+// queueID: 网卡队列 ID
+// fd: socket 文件描述符
 func (p *Program) Register(queueID int, fd int) error {
 	if err := p.Sockets.Put(uint32(queueID), uint32(fd)); err != nil {
-		return fmt.Errorf("failed to update xsksMap: %v", err)
+		return fmt.Errorf("failed to update xsks_map: %v", err)
 	}
 
 	if err := p.Queues.Put(uint32(queueID), uint32(1)); err != nil {
-		return fmt.Errorf("failed to update qidconfMap: %v", err)
+		return fmt.Errorf("failed to update qidconf_map: %v", err)
 	}
 	return nil
 }
 
-// Unregister removes any associated mapping to sockets for the given queueID.
+// Unregister 取消注册指定队列的 socket
 func (p *Program) Unregister(queueID int) error {
-	if err := p.Queues.Delete(uint32(queueID)); err != nil {
+	if err := p.Queues.Put(uint32(queueID), uint32(0)); err != nil {
 		return err
 	}
 	if err := p.Sockets.Delete(uint32(queueID)); err != nil {
@@ -56,192 +56,108 @@ func (p *Program) Unregister(queueID int) error {
 	return nil
 }
 
-// Close closes and frees the resources allocated for the Program.
+// Close 关闭并释放程序资源
 func (p *Program) Close() error {
-	allErrors := []error{}
+	var firstErr error
+
+	if p.DNSPorts != nil {
+		if err := p.DNSPorts.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("failed to close dns_ports_map: %v", err)
+		}
+		p.DNSPorts = nil
+	}
+
+	if p.Metrics != nil {
+		if err := p.Metrics.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("failed to close metrics_map: %v", err)
+		}
+		p.Metrics = nil
+	}
+
 	if p.Sockets != nil {
-		if err := p.Sockets.Close(); err != nil {
-			allErrors = append(allErrors, fmt.Errorf("failed to close xsksMap: %v", err))
+		if err := p.Sockets.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("failed to close xsks_map: %v", err)
 		}
 		p.Sockets = nil
 	}
 
 	if p.Queues != nil {
-		if err := p.Queues.Close(); err != nil {
-			allErrors = append(allErrors, fmt.Errorf("failed to close qidconfMap: %v", err))
+		if err := p.Queues.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("failed to close qidconf_map: %v", err)
 		}
 		p.Queues = nil
 	}
 
 	if p.Program != nil {
-		if err := p.Program.Close(); err != nil {
-			allErrors = append(allErrors, fmt.Errorf("failed to close XDP program: %v", err))
+		if err := p.Program.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("failed to close XDP program: %v", err)
 		}
 		p.Program = nil
 	}
 
-	if len(allErrors) > 0 {
-		return allErrors[0]
-	}
-	return nil
+	return firstErr
 }
 
-// NewProgram returns a translation of the default eBPF XDP program found in the
-// xsk_load_xdp_prog() function in <linux>/tools/lib/bpf/xsk.c:
-// https://github.com/torvalds/linux/blob/master/tools/lib/bpf/xsk.c#L259
-func NewProgram(maxQueueEntries int) (*Program, error) {
-	qidconfMap, err := ebpf.NewMap(&ebpf.MapSpec{
-		Name:       "qidconf_map",
-		Type:       ebpf.Array,
-		KeySize:    uint32(unsafe.Sizeof(int32(0))),
-		ValueSize:  uint32(unsafe.Sizeof(int32(0))),
-		MaxEntries: uint32(maxQueueEntries),
-		Flags:      0,
-		InnerMap:   nil,
-	})
+// LoadProgram 从 BPF 目标文件加载 XDP DNS 过滤程序
+//
+// 该程序只拦截指定 DNS 端口的 UDP 流量，其他所有流量（包括 SSH、HTTP 等）直接放行，
+// 确保不会影响正常网络通信。
+//
+// 参数:
+//   - bpfPath: BPF 程序文件路径 (如 "bpf/xdp_dns_filter_bpfel.o")
+//
+// 返回:
+//   - *Program: 加载的程序实例
+//   - error: 错误信息
+//
+// 使用示例:
+//
+//	program, err := xdp.LoadProgram("bpf/xdp_dns_filter_bpfel.o")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	defer program.Close()
+//
+//	// 设置要拦截的 DNS 端口
+//	program.SetDNSPorts([]uint16{53})
+//
+//	// 附加到网卡
+//	program.Attach(ifindex)
+func LoadProgram(bpfPath string) (*Program, error) {
+	// 加载 BPF collection
+	col, err := ebpf.LoadCollection(bpfPath)
 	if err != nil {
-		return nil, fmt.Errorf("ebpf.NewMap qidconf_map failed (try increasing RLIMIT_MEMLOCK): %v", err)
+		return nil, fmt.Errorf("failed to load BPF collection from %s: %v", bpfPath, err)
 	}
 
-	xsksMap, err := ebpf.NewMap(&ebpf.MapSpec{
-		Name:       "xsks_map",
-		Type:       ebpf.XSKMap,
-		KeySize:    uint32(unsafe.Sizeof(int32(0))),
-		ValueSize:  uint32(unsafe.Sizeof(int32(0))),
-		MaxEntries: uint32(maxQueueEntries),
-		Flags:      0,
-		InnerMap:   nil,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("ebpf.NewMap xsks_map failed (try increasing RLIMIT_MEMLOCK): %v", err)
-	}
+	prog := &Program{}
 
-	/*
-		This is a translation of the default eBPF XDP program found in the
-		xsk_load_xdp_prog() function in <linux>/tools/lib/bpf/xsk.c:
-		https://github.com/torvalds/linux/blob/master/tools/lib/bpf/xsk.c#L259
-
-		// This is the C-program:
-		// SEC("xdp_sock") int xdp_sock_prog(struct xdp_md *ctx)
-		// {
-		//     int *qidconf, index = ctx->rx_queue_index;
-		//
-		//     // A set entry here means that the correspnding queue_id
-		//     // has an active AF_XDP socket bound to it.
-		//     qidconf = bpf_map_lookup_elem(&qidconf_map, &index);
-		//     if (!qidconf)
-		//         return XDP_ABORTED;
-		//
-		//     if (*qidconf)
-		//         return bpf_redirect_map(&xsks_map, index, 0);
-		//
-		//     return XDP_PASS;
-		// }
-		//
-		struct bpf_insn prog[] = {
-			// r1 = *(u32 *)(r1 + 16)
-			BPF_LDX_MEM(BPF_W, BPF_REG_1, BPF_REG_1, 16),   // 0
-			// *(u32 *)(r10 - 4) = r1
-			BPF_STX_MEM(BPF_W, BPF_REG_10, BPF_REG_1, -4),  // 1
-			BPF_MOV64_REG(BPF_REG_2, BPF_REG_10),           // 2
-			BPF_ALU64_IMM(BPF_ADD, BPF_REG_2, -4),          // 3
-			BPF_LD_MAP_FD(BPF_REG_1, xsk->qidconf_map_fd),  // 4 (2 instructions)
-			BPF_EMIT_CALL(BPF_FUNC_map_lookup_elem),        // 5
-			BPF_MOV64_REG(BPF_REG_1, BPF_REG_0),            // 6
-			BPF_MOV32_IMM(BPF_REG_0, 0),                    // 7
-			// if r1 == 0 goto +8
-			BPF_JMP_IMM(BPF_JEQ, BPF_REG_1, 0, 8),          // 8
-			BPF_MOV32_IMM(BPF_REG_0, 2),                    // 9
-			// r1 = *(u32 *)(r1 + 0)
-			BPF_LDX_MEM(BPF_W, BPF_REG_1, BPF_REG_1, 0),    // 10
-			// if r1 == 0 goto +5
-			BPF_JMP_IMM(BPF_JEQ, BPF_REG_1, 0, 5),          // 11
-			// r2 = *(u32 *)(r10 - 4)
-			BPF_LD_MAP_FD(BPF_REG_1, xsk->xsks_map_fd),     // 12 (2 instructions)
-			BPF_LDX_MEM(BPF_W, BPF_REG_2, BPF_REG_10, -4),  // 13
-			BPF_MOV32_IMM(BPF_REG_3, 0),                    // 14
-			BPF_EMIT_CALL(BPF_FUNC_redirect_map),           // 15
-			// The jumps are to this instruction
-			BPF_EXIT_INSN(),                                // 16
-		};
-
-		eBPF instructions:
-		  0: code: 97 dst_reg: 1 src_reg: 1 off: 16 imm: 0   // 0
-		  1: code: 99 dst_reg: 10 src_reg: 1 off: -4 imm: 0  // 1
-		  2: code: 191 dst_reg: 2 src_reg: 10 off: 0 imm: 0  // 2
-		  3: code: 7 dst_reg: 2 src_reg: 0 off: 0 imm: -4    // 3
-		  4: code: 24 dst_reg: 1 src_reg: 1 off: 0 imm: 4    // 4 XXX use qidconfMap.FD as IMM
-		  5: code: 0 dst_reg: 0 src_reg: 0 off: 0 imm: 0     //   part of the same instruction
-		  6: code: 133 dst_reg: 0 src_reg: 0 off: 0 imm: 1   // 5
-		  7: code: 191 dst_reg: 1 src_reg: 0 off: 0 imm: 0   // 6
-		  8: code: 180 dst_reg: 0 src_reg: 0 off: 0 imm: 0   // 7
-		  9: code: 21 dst_reg: 1 src_reg: 0 off: 8 imm: 0    // 8
-		  10: code: 180 dst_reg: 0 src_reg: 0 off: 0 imm: 2  // 9
-		  11: code: 97 dst_reg: 1 src_reg: 1 off: 0 imm: 0   // 10
-		  12: code: 21 dst_reg: 1 src_reg: 0 off: 5 imm: 0   // 11
-		  13: code: 24 dst_reg: 1 src_reg: 1 off: 0 imm: 5   // 12 XXX use xsksMap.FD as IMM
-		  14: code: 0 dst_reg: 0 src_reg: 0 off: 0 imm: 0    //    part of the same instruction
-		  15: code: 97 dst_reg: 2 src_reg: 10 off: -4 imm: 0 // 13
-		  16: code: 180 dst_reg: 3 src_reg: 0 off: 0 imm: 0  // 14
-		  17: code: 133 dst_reg: 0 src_reg: 0 off: 0 imm: 51 // 15
-		  18: code: 149 dst_reg: 0 src_reg: 0 off: 0 imm: 0  // 16
-	*/
-
-	program, err := ebpf.NewProgram(&ebpf.ProgramSpec{
-		Name: "xsk_ebpf",
-		Type: ebpf.XDP,
-		Instructions: asm.Instructions{
-			{OpCode: 97, Dst: 1, Src: 1, Offset: 16},                                  // 0: code: 97 dst_reg: 1 src_reg: 1 off: 16 imm: 0   // 0
-			{OpCode: 99, Dst: 10, Src: 1, Offset: -4},                                 // 1: code: 99 dst_reg: 10 src_reg: 1 off: -4 imm: 0  // 1
-			{OpCode: 191, Dst: 2, Src: 10},                                            // 2: code: 191 dst_reg: 2 src_reg: 10 off: 0 imm: 0  // 2
-			{OpCode: 7, Dst: 2, Src: 0, Offset: 0, Constant: -4},                      // 3: code: 7 dst_reg: 2 src_reg: 0 off: 0 imm: -4    // 3
-			{OpCode: 24, Dst: 1, Src: 1, Offset: 0, Constant: int64(qidconfMap.FD())}, // 4: code: 24 dst_reg: 1 src_reg: 1 off: 0 imm: 4    // 4 XXX use qidconfMap.FD as IMM
-			//{ OpCode: 0 },                                                                 // 5: code: 0 dst_reg: 0 src_reg: 0 off: 0 imm: 0     //   part of the same instruction
-			{OpCode: 133, Dst: 0, Src: 0, Constant: 1},                  // 6: code: 133 dst_reg: 0 src_reg: 0 off: 0 imm: 1   // 5
-			{OpCode: 191, Dst: 1, Src: 0},                               // 7: code: 191 dst_reg: 1 src_reg: 0 off: 0 imm: 0   // 6
-			{OpCode: 180, Dst: 0, Src: 0},                               // 8: code: 180 dst_reg: 0 src_reg: 0 off: 0 imm: 0   // 7
-			{OpCode: 21, Dst: 1, Src: 0, Offset: 8},                     // 9: code: 21 dst_reg: 1 src_reg: 0 off: 8 imm: 0    // 8
-			{OpCode: 180, Dst: 0, Src: 0, Constant: 2},                  // 10: code: 180 dst_reg: 0 src_reg: 0 off: 0 imm: 2  // 9
-			{OpCode: 97, Dst: 1, Src: 1},                                // 11: code: 97 dst_reg: 1 src_reg: 1 off: 0 imm: 0   // 10
-			{OpCode: 21, Dst: 1, Offset: 5},                             // 12: code: 21 dst_reg: 1 src_reg: 0 off: 5 imm: 0   // 11
-			{OpCode: 24, Dst: 1, Src: 1, Constant: int64(xsksMap.FD())}, // 13: code: 24 dst_reg: 1 src_reg: 1 off: 0 imm: 5   // 12 XXX use xsksMap.FD as IMM
-			//{ OpCode: 0 },                                                                 // 14: code: 0 dst_reg: 0 src_reg: 0 off: 0 imm: 0    //    part of the same instruction
-			{OpCode: 97, Dst: 2, Src: 10, Offset: -4}, // 15: code: 97 dst_reg: 2 src_reg: 10 off: -4 imm: 0 // 13
-			{OpCode: 180, Dst: 3},                     // 16: code: 180 dst_reg: 3 src_reg: 0 off: 0 imm: 0  // 14
-			{OpCode: 133, Constant: 51},               // 17: code: 133 dst_reg: 0 src_reg: 0 off: 0 imm: 51 // 15
-			{OpCode: 149},                             // 18: code: 149 dst_reg: 0 src_reg: 0 off: 0 imm: 0  // 16
-		},
-		License:       "LGPL-2.1 or BSD-2-Clause",
-		KernelVersion: 0,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("error: ebpf.NewProgram failed: %v", err)
-	}
-
-	return &Program{Program: program, Queues: qidconfMap, Sockets: xsksMap}, nil
-}
-
-// LoadProgram load a external XDP program, along with queue and socket map;
-// fname is the BPF kernel program file (.o);
-// funcname is the function name in the program file;
-// qidmapname is the Queues map name;
-// xskmapname is the Sockets map name;
-func LoadProgram(fname, funcname, qidmapname, xskmapname string) (*Program, error) {
-	prog := new(Program)
-	col, err := ebpf.LoadCollection(fname)
-	if err != nil {
-		return nil, err
-	}
+	// 获取 XDP 程序
 	var ok bool
-	if prog.Program, ok = col.Programs[funcname]; !ok {
-		return nil, fmt.Errorf("%v doesn't contain a function named %v", fname, funcname)
+	if prog.Program, ok = col.Programs["xdp_dns_filter"]; !ok {
+		col.Close()
+		return nil, fmt.Errorf("BPF program 'xdp_dns_filter' not found in %s", bpfPath)
 	}
-	if prog.Queues, ok = col.Maps[qidmapname]; !ok {
-		return nil, fmt.Errorf("%v doesn't contain a queue map named %v", fname, qidmapname)
+
+	// 获取必需的 maps
+	if prog.Queues, ok = col.Maps["qidconf_map"]; !ok {
+		col.Close()
+		return nil, fmt.Errorf("map 'qidconf_map' not found in %s", bpfPath)
 	}
-	if prog.Sockets, ok = col.Maps[xskmapname]; !ok {
-		return nil, fmt.Errorf("%v doesn't contain a socket map named %v", fname, xskmapname)
+
+	if prog.Sockets, ok = col.Maps["xsks_map"]; !ok {
+		col.Close()
+		return nil, fmt.Errorf("map 'xsks_map' not found in %s", bpfPath)
 	}
+
+	if prog.DNSPorts, ok = col.Maps["dns_ports_map"]; !ok {
+		col.Close()
+		return nil, fmt.Errorf("map 'dns_ports_map' not found in %s", bpfPath)
+	}
+
+	// 获取可选的 metrics map
+	prog.Metrics = col.Maps["metrics_map"]
+
 	return prog, nil
 }
 
@@ -288,54 +204,12 @@ func attachProgram(Ifindex int, program *ebpf.Program) error {
 	return netlink.LinkSetXdpFdWithFlags(link, program.FD(), int(DefaultXdpFlags))
 }
 
-// LoadDNSFilterProgram 加载 DNS 过滤 XDP 程序
-// 这个程序只拦截 DNS 端口(53)的 UDP 流量，其他流量直接放行
-// bpfPath: BPF 程序文件路径 (如 "bpf/xdp_dns_filter_bpfel.o")
-func LoadDNSFilterProgram(bpfPath string) (*Program, error) {
-	// 加载 BPF collection
-	col, err := ebpf.LoadCollection(bpfPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load BPF collection from %s: %v", bpfPath, err)
-	}
-
-	prog := &Program{}
-
-	// 获取 XDP 程序
-	var ok bool
-	if prog.Program, ok = col.Programs["xdp_dns_filter"]; !ok {
-		col.Close()
-		return nil, fmt.Errorf("BPF program 'xdp_dns_filter' not found in %s", bpfPath)
-	}
-
-	// 获取必需的 maps
-	if prog.Queues, ok = col.Maps["qidconf_map"]; !ok {
-		col.Close()
-		return nil, fmt.Errorf("map 'qidconf_map' not found in %s", bpfPath)
-	}
-
-	if prog.Sockets, ok = col.Maps["xsks_map"]; !ok {
-		col.Close()
-		return nil, fmt.Errorf("map 'xsks_map' not found in %s", bpfPath)
-	}
-
-	if prog.DNSPorts, ok = col.Maps["dns_ports_map"]; !ok {
-		col.Close()
-		return nil, fmt.Errorf("map 'dns_ports_map' not found in %s", bpfPath)
-	}
-
-	// 获取可选的 metrics map
-	prog.Metrics = col.Maps["metrics_map"] // 可能为 nil
-
-	return prog, nil
-}
-
 // SetDNSPorts 设置需要拦截的 DNS 端口
 func (p *Program) SetDNSPorts(ports []uint16) error {
 	if p.DNSPorts == nil {
-		return fmt.Errorf("dns_ports_map not initialized (use LoadDNSFilterProgram)")
+		return fmt.Errorf("dns_ports_map not initialized")
 	}
 
-	// 清空现有端口（可选，这里我们直接添加）
 	value := uint8(1)
 	for _, port := range ports {
 		if err := p.DNSPorts.Put(port, value); err != nil {

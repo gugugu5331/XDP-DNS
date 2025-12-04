@@ -110,7 +110,6 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/cilium/ebpf"
 	"golang.org/x/sys/unix"
 )
 
@@ -144,9 +143,6 @@ type Socket struct {
 	rxRing                   rxTxRing
 	txRing                   rxTxRing
 	completionRing           umemRing
-	qidconfMap               *ebpf.Map
-	xsksMap                  *ebpf.Map
-	program                  *ebpf.Program
 	ifindex                  int
 	numTransmitted           int
 	numFilled                int

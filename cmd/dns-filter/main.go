@@ -60,37 +60,28 @@ func main() {
 	if bpfProgPath == "" {
 		bpfProgPath = cfg.BPFPath
 	}
+	if bpfProgPath == "" {
+		log.Fatalf("BPF program path is required. Set bpf_path in config or use -bpf flag")
+	}
 
-	// 创建 XDP 程序
-	var program *xdp.Program
-	if bpfProgPath != "" {
-		// 使用真正的 DNS 过滤程序（只拦截 DNS 端口 53）
-		log.Printf("Loading DNS filter BPF program from: %s", bpfProgPath)
-		program, err = xdp.LoadDNSFilterProgram(bpfProgPath)
-		if err != nil {
-			log.Fatalf("Failed to load DNS filter program: %v", err)
-		}
-
-		// 设置 DNS 端口
-		dnsPorts := []uint16{53} // 默认只监听端口 53
-		if len(cfg.DNS.ListenPorts) > 0 {
-			dnsPorts = cfg.DNS.ListenPorts
-		}
-		if err := program.SetDNSPorts(dnsPorts); err != nil {
-			log.Fatalf("Failed to set DNS ports: %v", err)
-		}
-		log.Printf("DNS ports configured: %v", dnsPorts)
-		log.Printf("NOTE: Only UDP port 53 traffic will be intercepted. SSH and other traffic will PASS through.")
-	} else {
-		// 使用简单的 XDP 程序（重定向所有流量）
-		log.Printf("Using simple XDP program (redirects ALL traffic on queue %d)", cfg.QueueID)
-		log.Printf("WARNING: This may affect SSH if on the same queue!")
-		program, err = xdp.NewProgram(cfg.QueueCount)
-		if err != nil {
-			log.Fatalf("Failed to create XDP program: %v", err)
-		}
+	// 加载 XDP DNS 过滤程序
+	log.Printf("Loading XDP DNS filter program from: %s", bpfProgPath)
+	program, err := xdp.LoadProgram(bpfProgPath)
+	if err != nil {
+		log.Fatalf("Failed to load XDP program: %v", err)
 	}
 	defer program.Close()
+
+	// 设置 DNS 端口
+	dnsPorts := []uint16{53} // 默认只监听端口 53
+	if len(cfg.DNS.ListenPorts) > 0 {
+		dnsPorts = cfg.DNS.ListenPorts
+	}
+	if err := program.SetDNSPorts(dnsPorts); err != nil {
+		log.Fatalf("Failed to set DNS ports: %v", err)
+	}
+	log.Printf("DNS ports configured: %v", dnsPorts)
+	log.Printf("NOTE: Only UDP traffic to these ports will be intercepted. SSH and other traffic will PASS through.")
 
 	// 附加 XDP 程序到接口
 	if err := program.Attach(ifindex); err != nil {

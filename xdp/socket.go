@@ -182,22 +182,36 @@ func NewXDPSocket(ifindex int, queueID int, config *XDPSocketConfig) (*XDPSocket
 	return xsk, nil
 }
 
-// NewXDPSocketWithProgram 创建带有 XDP 程序的 Socket
+// NewXDPSocketWithProgram 创建带有 XDP DNS 过滤程序的 Socket
 //
-// 这个方法会同时创建 XDP 程序并附加到网卡
-func NewXDPSocketWithProgram(ifindex int, queueID int, config *XDPSocketConfig) (*XDPSocket, error) {
+// 参数:
+//   - ifindex: 网卡索引
+//   - queueID: 队列 ID
+//   - bpfPath: BPF 程序文件路径
+//   - dnsPorts: 要拦截的 DNS 端口列表
+//   - config: Socket 配置 (可为 nil 使用默认配置)
+func NewXDPSocketWithProgram(ifindex int, queueID int, bpfPath string, dnsPorts []uint16, config *XDPSocketConfig) (*XDPSocket, error) {
 	xsk, err := NewXDPSocket(ifindex, queueID, config)
 	if err != nil {
 		return nil, err
 	}
 
-	// 创建 XDP 程序
-	program, err := NewProgram(queueID + 1)
+	// 加载 XDP DNS 过滤程序
+	program, err := LoadProgram(bpfPath)
 	if err != nil {
 		xsk.Close()
-		return nil, fmt.Errorf("创建 XDP 程序失败: %w", err)
+		return nil, fmt.Errorf("加载 XDP 程序失败: %w", err)
 	}
 	xsk.program = program
+
+	// 设置 DNS 端口
+	if len(dnsPorts) == 0 {
+		dnsPorts = []uint16{53} // 默认端口 53
+	}
+	if err := program.SetDNSPorts(dnsPorts); err != nil {
+		xsk.Close()
+		return nil, fmt.Errorf("设置 DNS 端口失败: %w", err)
+	}
 
 	// 附加程序到网卡
 	if err := program.Attach(ifindex); err != nil {
