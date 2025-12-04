@@ -11,6 +11,7 @@ LOG_DIR="$TEST_DIR"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
 NC='\033[0m'
 
 cleanup() {
@@ -24,7 +25,8 @@ cleanup() {
 trap cleanup EXIT
 
 echo -e "${BLUE}╔═══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║         XDP DNS 响应测试                                       ║${NC}"
+echo -e "${BLUE}║         XDP DNS 响应功能测试                                   ║${NC}"
+echo -e "${BLUE}║         测试威胁域名会收到 NXDOMAIN 响应                        ║${NC}"
 echo -e "${BLUE}╚═══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -49,8 +51,8 @@ MAC=$(ip link show veth_xdp | grep ether | awk '{print $2}')
 ip netns exec ns_test ip neigh replace 10.99.0.1 lladdr $MAC dev veth_send nud permanent
 echo -e "  ${GREEN}✓${NC} 网络环境就绪"
 
-# 创建配置文件（启用响应）
-echo -e "${BLUE}[2/5] 创建配置文件（启用响应）...${NC}"
+# 创建配置文件
+echo -e "${BLUE}[2/5] 创建配置文件...${NC}"
 cat > "$LOG_DIR/config.yaml" << EOF
 interface: veth_xdp
 queue_start: 0
@@ -75,13 +77,12 @@ response:
   enabled: true
   block_response: true
   nxdomain: true
-  echo_mode: true
 metrics:
   enabled: true
   listen: ":9096"
   path: "/metrics"
 EOF
-echo -e "  ${GREEN}✓${NC} 配置文件已创建（响应已启用）"
+echo -e "  ${GREEN}✓${NC} 配置文件已创建"
 
 # 启动 DNS Filter
 echo -e "${BLUE}[3/5] 启动 XDP DNS Filter...${NC}"
@@ -100,42 +101,39 @@ echo -e "  ${GREEN}✓${NC} 进程启动 (PID: $FILTER_PID)"
 echo -e "${BLUE}[4/5] 测试 DNS 查询响应...${NC}"
 echo ""
 
-# 测试 1: 使用 dig（如果可用）
-if command -v dig &> /dev/null; then
-    echo "  测试 1: 使用 dig 发送查询..."
-    result=$(timeout 5 ip netns exec ns_test dig @10.99.0.1 example.com +short +tries=1 +time=2 2>&1 || echo "TIMEOUT")
-    if [ "$result" = "TIMEOUT" ] || [ -z "$result" ]; then
-        echo -e "    ${RED}✗${NC} dig 未收到响应 (超时)"
-    else
-        echo -e "    ${GREEN}✓${NC} dig 收到响应: $result"
-    fi
-else
-    echo "  dig 未安装，跳过测试 1"
-fi
-
-# 测试 2: 使用 nslookup
-echo ""
-echo "  测试 2: 使用 nslookup 发送查询..."
+# 测试 1: 正常域名 (应该被记录为 SUSPICIOUS)
+echo "  测试 1: 查询正常域名 (example.com)..."
 result=$(timeout 5 ip netns exec ns_test nslookup -timeout=2 example.com 10.99.0.1 2>&1 || echo "TIMEOUT")
-if echo "$result" | grep -q "TIMEOUT\|timed out\|connection timed out"; then
-    echo -e "    ${RED}✗${NC} nslookup 未收到响应 (超时)"
-    echo "    调试信息: $result"
+if echo "$result" | grep -q "timed out\|TIMEOUT"; then
+    echo -e "    ${YELLOW}⚠${NC} 正常域名: 无响应 (预期 - 仅分析模式)"
 else
-    echo -e "    ${GREEN}✓${NC} nslookup 收到响应"
-    echo "$result" | head -5 | sed 's/^/    /'
+    echo -e "    ${GREEN}✓${NC} 正常域名: 收到响应"
 fi
 
-# 测试 3: 使用 nc 发送原始 DNS 查询
+# 测试 2: 恶意域名 (应该被阻止并返回 NXDOMAIN)
 echo ""
-echo "  测试 3: 使用 nc 发送原始 DNS 查询..."
-# DNS 查询 example.com A (简化版)
-DNS_QUERY=$(echo -e '\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01')
-result=$(echo -n "$DNS_QUERY" | timeout 3 ip netns exec ns_test nc -u -w 2 10.99.0.1 53 | xxd 2>&1 || echo "TIMEOUT")
-if [ "$result" = "TIMEOUT" ] || [ -z "$result" ]; then
-    echo -e "    ${RED}✗${NC} nc 未收到响应"
+echo "  测试 2: 查询恶意域名 (test.malware.com)..."
+result=$(timeout 5 ip netns exec ns_test nslookup -timeout=2 test.malware.com 10.99.0.1 2>&1 || echo "TIMEOUT")
+if echo "$result" | grep -qi "NXDOMAIN\|can't find\|server failed"; then
+    echo -e "    ${GREEN}✓${NC} 恶意域名: 收到 NXDOMAIN 响应!"
+    echo "$result" | head -5 | sed 's/^/      /'
+elif echo "$result" | grep -q "timed out\|TIMEOUT"; then
+    echo -e "    ${RED}✗${NC} 恶意域名: 超时 (响应可能未发送)"
 else
-    echo -e "    ${GREEN}✓${NC} nc 收到响应:"
-    echo "$result" | head -3 | sed 's/^/    /'
+    echo -e "    ${YELLOW}⚠${NC} 恶意域名: 收到响应但非 NXDOMAIN"
+    echo "$result" | head -3 | sed 's/^/      /'
+fi
+
+# 测试 3: 钓鱼域名
+echo ""
+echo "  测试 3: 查询钓鱼域名 (login.phishing.net)..."
+result=$(timeout 5 ip netns exec ns_test nslookup -timeout=2 login.phishing.net 10.99.0.1 2>&1 || echo "TIMEOUT")
+if echo "$result" | grep -qi "NXDOMAIN\|can't find\|server failed"; then
+    echo -e "    ${GREEN}✓${NC} 钓鱼域名: 收到 NXDOMAIN 响应!"
+elif echo "$result" | grep -q "timed out\|TIMEOUT"; then
+    echo -e "    ${RED}✗${NC} 钓鱼域名: 超时"
+else
+    echo -e "    ${YELLOW}⚠${NC} 钓鱼域名: 响应异常"
 fi
 
 # 检查日志
@@ -143,23 +141,21 @@ echo ""
 echo -e "${BLUE}[5/5] 检查处理日志...${NC}"
 sleep 1
 
-echo "  最近日志:"
-tail -20 "$LOG_DIR/dns-filter.log" | grep -E "received|SUSPICIOUS|THREAT|Response|Queue" | tail -10 | sed 's/^/    /'
+echo "  威胁检测日志:"
+grep -E "THREAT|RESPONSE SENT" "$LOG_DIR/dns-filter.log" | tail -5 | sed 's/^/    /' || echo "    (无威胁检测记录)"
 
-# 统计
 echo ""
-if curl -s "http://localhost:9096/metrics" > /dev/null 2>&1; then
-    stats=$(curl -s "http://localhost:9096/metrics" | grep -E "dns_filter_(received|blocked|allowed)" | head -5)
-    echo "  Metrics:"
-    echo "$stats" | sed 's/^/    /'
-fi
+echo "  可疑流量日志:"
+grep "SUSPICIOUS" "$LOG_DIR/dns-filter.log" | tail -3 | sed 's/^/    /' || echo "    (无可疑流量记录)"
 
 echo ""
 echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
-echo "  完整日志: $LOG_DIR/dns-filter.log"
 echo ""
-echo "  手动测试命令:"
-echo "    ip netns exec ns_test dig @10.99.0.1 example.com"
-echo "    ip netns exec ns_test nslookup example.com 10.99.0.1"
+echo "  📁 完整日志: $LOG_DIR/dns-filter.log"
+echo ""
+echo "  💡 说明:"
+echo "     - 正常域名: 仅记录分析，不返回响应"
+echo "     - 恶意域名: 被阻止并返回 NXDOMAIN 响应"
+echo "     - 响应功能: 当 block_response: true 时启用"
 echo ""
 

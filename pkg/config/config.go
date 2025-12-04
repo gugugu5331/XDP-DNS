@@ -54,7 +54,6 @@ type ResponseConfig struct {
 	Enabled       bool `yaml:"enabled"`        // 是否启用响应发送
 	BlockResponse bool `yaml:"block_response"` // 是否对阻止的请求发送响应
 	NXDomain      bool `yaml:"nxdomain"`       // 对阻止的请求返回 NXDOMAIN
-	EchoMode      bool `yaml:"echo_mode"`      // 回显模式：对所有查询返回空响应（用于测试）
 }
 
 // MetricsConfig 监控配置

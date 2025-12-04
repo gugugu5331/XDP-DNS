@@ -114,18 +114,6 @@ func (p *Pool) handleActionWithResponse(pkt Packet, msg *dns.Message, action fil
 		}
 	}
 
-	// Echo 模式：对所有查询返回响应（用于测试）
-	if p.options.ResponseConfig != nil && p.options.ResponseConfig.EchoMode {
-		dnsResp := buildEchoResponse(msg)
-		if dnsResp != nil {
-			p.sendResponse(pkt, dnsResp, pktInfo)
-			if metricsCollector != nil {
-				metricsCollector.IncAllowed()
-			}
-			return
-		}
-	}
-
 	// 默认处理逻辑
 	switch action {
 	case filter.ActionAllow:
@@ -150,6 +138,7 @@ func (p *Pool) handleActionWithResponse(pkt Packet, msg *dns.Message, action fil
 			dnsResp := buildBlockResponse(msg, p.options.ResponseConfig.NXDomain)
 			if dnsResp != nil {
 				p.sendResponse(pkt, dnsResp, pktInfo)
+				log.Printf("RESPONSE SENT: NXDOMAIN for %s to %s", msg.GetQueryDomain(), pktInfo.SrcIP)
 			}
 		}
 
