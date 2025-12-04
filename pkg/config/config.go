@@ -51,9 +51,10 @@ type DNSConfig struct {
 
 // ResponseConfig 响应配置
 type ResponseConfig struct {
-	Enabled       bool `yaml:"enabled"`        // 是否启用响应发送
-	BlockResponse bool `yaml:"block_response"` // 是否对阻止的请求发送响应
-	NXDomain      bool `yaml:"nxdomain"`       // 对阻止的请求返回 NXDOMAIN
+	Enabled       bool   `yaml:"enabled"`        // 是否启用响应发送
+	Mode          string `yaml:"mode"`           // 响应模式: "block_only"(仅阻止), "all"(所有请求)
+	BlockResponse bool   `yaml:"block_response"` // 是否对阻止的请求发送响应
+	NXDomain      bool   `yaml:"nxdomain"`       // 对阻止的请求返回 NXDOMAIN (否则 REFUSED)
 }
 
 // MetricsConfig 监控配置
@@ -99,6 +100,7 @@ func DefaultConfig() *Config {
 		},
 		Response: ResponseConfig{
 			Enabled:       true,
+			Mode:          "block_only", // 默认仅对阻止的请求响应
 			BlockResponse: true,
 			NXDomain:      true,
 		},

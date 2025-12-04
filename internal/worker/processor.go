@@ -114,12 +114,25 @@ func (p *Pool) handleActionWithResponse(pkt Packet, msg *dns.Message, action fil
 		}
 	}
 
+	// 检查响应模式
+	responseMode := ""
+	if p.options.ResponseConfig != nil {
+		responseMode = p.options.ResponseConfig.Mode
+	}
+
 	// 默认处理逻辑
 	switch action {
 	case filter.ActionAllow:
-		// 正常流量 - 仅统计
+		// 正常流量 - 统计
 		if metricsCollector != nil {
 			metricsCollector.IncAllowed()
+		}
+		// "all" 模式：对所有请求发送响应
+		if responseMode == "all" {
+			dnsResp := buildSuccessResponse(msg)
+			if dnsResp != nil {
+				p.sendResponse(pkt, dnsResp, pktInfo)
+			}
 		}
 
 	case filter.ActionBlock:
@@ -138,7 +151,6 @@ func (p *Pool) handleActionWithResponse(pkt Packet, msg *dns.Message, action fil
 			dnsResp := buildBlockResponse(msg, p.options.ResponseConfig.NXDomain)
 			if dnsResp != nil {
 				p.sendResponse(pkt, dnsResp, pktInfo)
-				log.Printf("RESPONSE SENT: NXDOMAIN for %s to %s", msg.GetQueryDomain(), pktInfo.SrcIP)
 			}
 		}
 
@@ -151,6 +163,13 @@ func (p *Pool) handleActionWithResponse(pkt Packet, msg *dns.Message, action fil
 			dns.TypeName(msg.GetQueryType()))
 		if metricsCollector != nil {
 			metricsCollector.IncLogged()
+		}
+		// "all" 模式：对所有请求发送响应
+		if responseMode == "all" {
+			dnsResp := buildSuccessResponse(msg)
+			if dnsResp != nil {
+				p.sendResponse(pkt, dnsResp, pktInfo)
+			}
 		}
 	}
 }

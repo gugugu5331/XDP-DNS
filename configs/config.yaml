@@ -40,6 +40,7 @@ dns:
 # 响应配置
 response:
   enabled: true         # 是否启用响应发送
+  mode: "block_only"    # 响应模式: "block_only"(仅阻止), "all"(所有请求都响应，用于测试)
   block_response: true  # 对阻止的请求是否发送响应
   nxdomain: true        # 返回 NXDOMAIN (true) 或 REFUSED (false)
 

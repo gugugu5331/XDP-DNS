@@ -166,8 +166,9 @@ func buildBlockResponse(query *dns.Message, nxdomain bool) []byte {
 	return resp
 }
 
-// buildEchoResponse 构建回显响应（用于测试，返回 NOERROR 无记录）
-func buildEchoResponse(query *dns.Message) []byte {
+// buildSuccessResponse 构建成功响应（NOERROR，无记录）
+// 用于测试模式，让 dnsperf/dig 等工具知道请求成功处理
+func buildSuccessResponse(query *dns.Message) []byte {
 	if query == nil || len(query.RawData) < 12 {
 		return nil
 	}
