@@ -446,6 +446,10 @@ func (xsk *Socket) Receive(num int) []Desc {
 // The descriptors can be acquired either by calling the GetDescs() method or
 // by calling Receive() method.
 func (xsk *Socket) Transmit(descs []Desc) (numSubmitted int) {
+	if len(xsk.freeTXDescs) == 0 {
+		return 0
+	}
+
 	numFreeSlots := xsk.NumFreeTxSlots()
 	if len(descs) > numFreeSlots {
 		descs = descs[:numFreeSlots]
@@ -455,7 +459,10 @@ func (xsk *Socket) Transmit(descs []Desc) (numSubmitted int) {
 	for _, desc := range descs {
 		xsk.txRing.Descs[prod&uint32(xsk.options.TxRingNumDescs-1)] = desc
 		prod++
-		xsk.freeTXDescs[desc.Addr/uint64(xsk.options.FrameSize)] = false
+		idx := desc.Addr / uint64(xsk.options.FrameSize)
+		if idx < uint64(len(xsk.freeTXDescs)) {
+			xsk.freeTXDescs[idx] = false
+		}
 	}
 	//fencer.SFence()
 	*xsk.txRing.Producer = prod
@@ -632,12 +639,19 @@ func (xsk *Socket) Close() error {
 // You should use this method if you are doing polling on the xdp.Socket file
 // descriptor yourself, rather than using the Poll() method.
 func (xsk *Socket) Complete(n int) {
+	if n <= 0 || len(xsk.freeTXDescs) == 0 {
+		return
+	}
+
 	cons := *xsk.completionRing.Consumer
 	//fencer.LFence()
 	for i := 0; i < n; i++ {
 		addr := xsk.completionRing.Descs[cons&uint32(xsk.options.CompletionRingNumDescs-1)]
 		cons++
-		xsk.freeTXDescs[addr/uint64(xsk.options.FrameSize)] = true
+		idx := addr / uint64(xsk.options.FrameSize)
+		if idx < uint64(len(xsk.freeTXDescs)) {
+			xsk.freeTXDescs[idx] = true
+		}
 	}
 	//fencer.MFence()
 	*xsk.completionRing.Consumer = cons

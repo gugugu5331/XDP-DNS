@@ -1,0 +1,39 @@
+goos: linux
+goarch: amd64
+pkg: xdp-dns/pkg/dns
+cpu: 13th Gen Intel(R) Core(TM) i7-1360P
+BenchmarkDNSParse-16              	 6224971	       540.0 ns/op	     312 B/op	       9 allocs/op
+BenchmarkDNSParse-16              	 7491358	       525.2 ns/op	     312 B/op	       9 allocs/op
+BenchmarkDNSParse-16              	 6183936	       566.2 ns/op	     312 B/op	       9 allocs/op
+BenchmarkDNSParseLongDomain-16    	 5919620	       634.6 ns/op	     344 B/op	      10 allocs/op
+BenchmarkDNSParseLongDomain-16    	 4778116	       660.3 ns/op	     344 B/op	      10 allocs/op
+BenchmarkDNSParseLongDomain-16    	 4542764	      1023 ns/op	     344 B/op	      10 allocs/op
+BenchmarkDNSParseAndExtract-16    	 3873026	       822.9 ns/op	     344 B/op	      10 allocs/op
+BenchmarkDNSParseAndExtract-16    	 3897280	       840.8 ns/op	     344 B/op	      10 allocs/op
+BenchmarkDNSParseAndExtract-16    	 4096143	       798.3 ns/op	     344 B/op	      10 allocs/op
+BenchmarkParser_Parse-16          	 7024825	       565.1 ns/op	     248 B/op	       7 allocs/op
+BenchmarkParser_Parse-16          	 7318977	       474.3 ns/op	     248 B/op	       7 allocs/op
+BenchmarkParser_Parse-16          	 7653922	       416.9 ns/op	     248 B/op	       7 allocs/op
+PASS
+ok  	xdp-dns/pkg/dns	53.530s
+goos: linux
+goarch: amd64
+pkg: xdp-dns/pkg/filter
+cpu: 13th Gen Intel(R) Core(TM) i7-1360P
+BenchmarkTrieMatch-16              	21812098	       176.0 ns/op	      48 B/op	       1 allocs/op
+BenchmarkTrieMatch-16              	21871021	       182.9 ns/op	      48 B/op	       1 allocs/op
+BenchmarkTrieMatch-16              	19638242	       225.6 ns/op	      48 B/op	       1 allocs/op
+BenchmarkTrieMatchWildcard-16      	21891012	       206.4 ns/op	      64 B/op	       1 allocs/op
+BenchmarkTrieMatchWildcard-16      	19219425	       174.7 ns/op	      64 B/op	       1 allocs/op
+BenchmarkTrieMatchWildcard-16      	19412822	       235.9 ns/op	      64 B/op	       1 allocs/op
+BenchmarkEngineCheck-16            	13674800	       232.7 ns/op	      48 B/op	       1 allocs/op
+BenchmarkEngineCheck-16            	15402910	       257.2 ns/op	      48 B/op	       1 allocs/op
+BenchmarkEngineCheck-16            	17311959	       229.7 ns/op	      48 B/op	       1 allocs/op
+BenchmarkEngineCheckWildcard-16    	15355137	       248.6 ns/op	      64 B/op	       1 allocs/op
+BenchmarkEngineCheckWildcard-16    	13867082	       336.0 ns/op	      64 B/op	       1 allocs/op
+BenchmarkEngineCheckWildcard-16    	14844820	       237.1 ns/op	      64 B/op	       1 allocs/op
+BenchmarkEngine_Check-16           	21317526	       193.0 ns/op	      48 B/op	       1 allocs/op
+BenchmarkEngine_Check-16           	20152185	       180.6 ns/op	      48 B/op	       1 allocs/op
+BenchmarkEngine_Check-16           	17255883	       227.0 ns/op	      48 B/op	       1 allocs/op
+PASS
+ok  	xdp-dns/pkg/filter	68.543s

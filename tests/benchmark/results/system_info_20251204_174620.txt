@@ -1,0 +1,19 @@
+========================================
+测试时间: Thu Dec  4 17:46:20 CST 2025
+主机名: PF571MDH
+
+CPU 信息:
+CPU(s):                               16
+On-line CPU(s) list:                  0-15
+Model name:                           13th Gen Intel(R) Core(TM) i7-1360P
+Thread(s) per core:                   2
+Core(s) per socket:                   8
+NUMA node0 CPU(s):                    0-15
+
+内存信息:
+               total        used        free      shared  buff/cache   available
+Mem:           7.6Gi       1.5Gi       5.3Gi       3.0Mi       894Mi       6.0Gi
+Swap:          2.0Gi          0B       2.0Gi
+
+Go 版本: go version go1.23.3 linux/amd64
+GCC 版本: g++ (Ubuntu 11.4.0-1ubuntu1~22.04.2) 11.4.0
