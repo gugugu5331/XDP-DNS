@@ -34,6 +34,8 @@
 - **零拷贝**: AF_XDP Socket 实现用户态零拷贝数据包处理
 - **高吞吐**: 支持百万级 PPS 的 DNS 流量分析能力
 - **威胁检测**: 基于规则的域名威胁匹配 (精确匹配 + 通配符)
+- **多队列支持**: 并行处理多个 RX 队列，线性扩展性能
+- **可配置响应**: 对威胁域名返回 NXDOMAIN，支持测试模式
 - **Prometheus 监控**: 内置威胁检测指标导出
 - **混合架构**: C++ 高性能解析 + Go 灵活规则引擎
 
@@ -120,19 +122,27 @@ make build-go
 编辑 `configs/config.yaml`:
 
 ```yaml
-interface: eth0      # 网络接口
-queue_id: 0         # 队列 ID
+interface: eth0           # 网络接口
+queue_start: 0            # 起始队列 ID
+queue_count: 4            # 队列数量 (多队列支持)
 
 xdp:
-  num_frames: 4096   # UMEM 帧数量
-  frame_size: 2048   # 帧大小
+  num_frames: 4096        # UMEM 帧数量
+  frame_size: 2048        # 帧大小
 
 workers:
-  num_workers: 8     # Worker 数量
+  num_workers: 0          # Worker 数量 (0=自动)
+  workers_per_queue: 2    # 每队列 Worker 数
 
 dns:
   listen_ports:
     - 53
+
+response:
+  enabled: true           # 启用响应
+  mode: "block_only"      # "block_only" 或 "all"(测试用)
+  block_response: true    # 对威胁返回 NXDOMAIN
+  nxdomain: true
 
 metrics:
   enabled: true
