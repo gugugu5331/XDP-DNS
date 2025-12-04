@@ -3,6 +3,9 @@ package worker
 import (
 	"encoding/binary"
 	"errors"
+	"log"
+
+	"xdp-dns/pkg/dns"
 )
 
 // buildResponsePacket 构建响应数据包
@@ -58,8 +61,8 @@ func buildResponsePacket(origPkt []byte, dnsResponse []byte, pktInfo *PacketInfo
 		copy(response[ipStart:ipStart+ipHeaderLen], origPkt[ipStart:ipStart+ipHeaderLen])
 
 		// 交换源/目的 IP
-		copy(response[ipStart+8:ipStart+24], origPkt[ipStart+24:ipStart+40])  // Src = 原 Dst
-		copy(response[ipStart+24:ipStart+40], origPkt[ipStart+8:ipStart+24])  // Dst = 原 Src
+		copy(response[ipStart+8:ipStart+24], origPkt[ipStart+24:ipStart+40]) // Src = 原 Dst
+		copy(response[ipStart+24:ipStart+40], origPkt[ipStart+8:ipStart+24]) // Dst = 原 Src
 
 		// 更新 Payload Length
 		binary.BigEndian.PutUint16(response[ipStart+4:ipStart+6], uint16(UDPHeaderLen+len(dnsResponse)))
@@ -70,10 +73,10 @@ func buildResponsePacket(origPkt []byte, dnsResponse []byte, pktInfo *PacketInfo
 	origUDPStart := EthernetHeaderLen + ipHeaderLen
 
 	// 交换源/目的端口
-	binary.BigEndian.PutUint16(response[udpStart:udpStart+2], binary.BigEndian.Uint16(origPkt[origUDPStart+2:origUDPStart+4]))   // Src = 原 Dst
-	binary.BigEndian.PutUint16(response[udpStart+2:udpStart+4], binary.BigEndian.Uint16(origPkt[origUDPStart:origUDPStart+2]))   // Dst = 原 Src
-	binary.BigEndian.PutUint16(response[udpStart+4:udpStart+6], uint16(UDPHeaderLen+len(dnsResponse))) // UDP Length
-	binary.BigEndian.PutUint16(response[udpStart+6:udpStart+8], 0) // Checksum (可选)
+	binary.BigEndian.PutUint16(response[udpStart:udpStart+2], binary.BigEndian.Uint16(origPkt[origUDPStart+2:origUDPStart+4])) // Src = 原 Dst
+	binary.BigEndian.PutUint16(response[udpStart+2:udpStart+4], binary.BigEndian.Uint16(origPkt[origUDPStart:origUDPStart+2])) // Dst = 原 Src
+	binary.BigEndian.PutUint16(response[udpStart+4:udpStart+6], uint16(UDPHeaderLen+len(dnsResponse)))                         // UDP Length
+	binary.BigEndian.PutUint16(response[udpStart+6:udpStart+8], 0)                                                             // Checksum (可选)
 
 	// 复制 DNS 响应
 	copy(response[udpStart+UDPHeaderLen:], dnsResponse)
@@ -85,6 +88,82 @@ func buildResponsePacket(origPkt []byte, dnsResponse []byte, pktInfo *PacketInfo
 	}
 
 	return response, nil
+}
+
+// sendResponse 发送 DNS 响应
+func (p *Pool) sendResponse(pkt Packet, dnsResp []byte, pktInfo *PacketInfo) {
+	if pkt.Socket == nil || pkt.OrigData == nil {
+		return
+	}
+
+	// 构建响应数据包
+	respPkt, err := buildResponsePacket(pkt.OrigData, dnsResp, pktInfo)
+	if err != nil {
+		log.Printf("Failed to build response packet: %v", err)
+		return
+	}
+
+	// 获取 TX 描述符
+	txDescs := pkt.Socket.GetDescs(1, false)
+	if len(txDescs) == 0 {
+		log.Printf("No TX descriptors available")
+		return
+	}
+
+	// 复制响应到 UMEM
+	frame := pkt.Socket.GetFrame(txDescs[0])
+	if len(frame) < len(respPkt) {
+		log.Printf("Frame too small for response")
+		return
+	}
+
+	copy(frame, respPkt)
+	txDescs[0].Len = uint32(len(respPkt))
+
+	// 发送
+	numSent := pkt.Socket.Transmit(txDescs)
+	if numSent == 0 {
+		log.Printf("Failed to transmit response: no descriptors sent")
+		return
+	}
+
+	// 完成发送
+	pkt.Socket.Complete(pkt.Socket.NumCompleted())
+}
+
+// buildBlockResponse 构建阻止响应 (NXDOMAIN 或 REFUSED)
+func buildBlockResponse(query *dns.Message, nxdomain bool) []byte {
+	if query == nil || len(query.RawData) < 12 {
+		return nil
+	}
+
+	// 复制原始查询
+	resp := make([]byte, len(query.RawData))
+	copy(resp, query.RawData)
+
+	// 修改标志位
+	// 设置 QR=1 (响应), OPCODE=0 (标准查询), AA=1 (权威), TC=0, RD=原值
+	// RA=1 (递归可用), Z=0, AD=0, CD=0, RCODE
+	flags := uint16(0x8180) // QR=1, AA=1, RA=1
+	if nxdomain {
+		flags |= 0x0003 // RCODE = NXDOMAIN (3)
+	} else {
+		flags |= 0x0005 // RCODE = REFUSED (5)
+	}
+	resp[2] = byte(flags >> 8)
+	resp[3] = byte(flags)
+
+	// QDCOUNT = 1, ANCOUNT = 0, NSCOUNT = 0, ARCOUNT = 0
+	resp[4] = 0
+	resp[5] = 1
+	resp[6] = 0
+	resp[7] = 0
+	resp[8] = 0
+	resp[9] = 0
+	resp[10] = 0
+	resp[11] = 0
+
+	return resp
 }
 
 // ipv4Checksum 计算 IPv4 头部校验和
@@ -122,8 +201,8 @@ func calculateUDPChecksum(packet []byte, ipStart, udpStart, dnsLen int, isIPv6 b
 			sum += uint32(packet[i])<<8 | uint32(packet[i+1])
 		}
 		udpLen := UDPHeaderLen + dnsLen
-		sum += 17                  // 协议号
-		sum += uint32(udpLen)      // UDP 长度
+		sum += 17             // 协议号
+		sum += uint32(udpLen) // UDP 长度
 	}
 
 	// UDP 头和数据
@@ -151,4 +230,3 @@ func calculateUDPChecksum(packet []byte, ipStart, udpStart, dnsLen int, isIPv6 b
 	}
 	return checksum
 }
-

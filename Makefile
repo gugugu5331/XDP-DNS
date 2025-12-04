@@ -125,6 +125,26 @@ test-xdp-quick: build
 	@echo "Running quick XDP test..."
 	@sudo ./tests/benchmark/test_full_flow.sh $(INTERFACE) 8.8.8.8 10
 
+# 多队列测试（需要 root）
+test-multi-queue: build
+	@echo "Running multi-queue test..."
+	@sudo ./tests/benchmark/test_multi_queue.sh
+
+# 启用网卡多队列
+enable-multi-queue:
+	@echo "Enabling multi-queue on $(INTERFACE)..."
+	@sudo ./scripts/enable_multi_queue.sh $(INTERFACE) $(NUM_QUEUES)
+
+# 显示网卡队列配置
+show-queue-config:
+	@echo "Network interface queue configuration:"
+	@ethtool -l $(INTERFACE) 2>/dev/null || (echo "ethtool not available"; exit 1)
+
+# 测试虚拟网卡多队列
+test-veth-multi-queue:
+	@echo "Configuring veth for multi-queue testing..."
+	@bash ./scripts/test_multi_queue.sh
+
 # 威胁检测逻辑测试（不需要 XDP）
 test-threat:
 	@echo "Testing threat detection logic..."
@@ -149,21 +169,27 @@ help:
 	@echo "  make bench          - Run benchmarks"
 	@echo ""
 	@echo "XDP Test Commands (require root):"
-	@echo "  make test-xdp-setup - Check XDP support"
-	@echo "  make test-xdp-quick - Quick XDP test (10s)"
-	@echo "  make test-xdp-full  - Full XDP test (30s)"
-	@echo "  make test-dnsperf   - Generate DNS traffic with dnsperf"
+	@echo "  make test-xdp-setup  - Check XDP support"
+	@echo "  make test-xdp-quick  - Quick XDP test (10s)"
+	@echo "  make test-xdp-full   - Full XDP test (30s)"
+	@echo "  make test-multi-queue - Multi-queue test"
+	@echo "  make test-dnsperf    - Generate DNS traffic with dnsperf"
+	@echo ""
+	@echo "Multi-Queue Commands:"
+	@echo "  make enable-multi-queue  - Enable multi-queue on INTERFACE"
+	@echo "  make show-queue-config   - Show current queue configuration"
 	@echo ""
 	@echo "Other Commands:"
-	@echo "  make lint           - Run code linting"
-	@echo "  make fmt            - Format code"
-	@echo "  make clean          - Clean build artifacts"
-	@echo "  make install        - Install to system (requires root)"
-	@echo "  make uninstall      - Uninstall from system"
-	@echo "  make run            - Build and run (dev mode)"
-	@echo "  make deps           - Download dependencies"
+	@echo "  make lint            - Run code linting"
+	@echo "  make fmt             - Format code"
+	@echo "  make clean           - Clean build artifacts"
+	@echo "  make install         - Install to system (requires root)"
+	@echo "  make uninstall       - Uninstall from system"
+	@echo "  make run             - Build and run (dev mode)"
+	@echo "  make deps            - Download dependencies"
 	@echo ""
 	@echo "Environment variables:"
-	@echo "  VERSION          - Build version (default: git tag)"
-	@echo "  INTERFACE        - Network interface (default: eth0)"
+	@echo "  VERSION              - Build version (default: git tag)"
+	@echo "  INTERFACE            - Network interface (default: eth0)"
+	@echo "  NUM_QUEUES           - Number of queues to enable (default: 4)"
 

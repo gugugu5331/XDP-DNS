@@ -10,32 +10,35 @@ import (
 
 // Config 主配置结构
 type Config struct {
-	Interface  string        `yaml:"interface"`   // 网络接口名
-	QueueID    int           `yaml:"queue_id"`    // 队列ID
-	QueueCount int           `yaml:"queue_count"` // 队列数量
-	BPFPath    string        `yaml:"bpf_path"`    // BPF程序路径
-	XDP        XDPConfig     `yaml:"xdp"`         // XDP配置
-	Workers    WorkerConfig  `yaml:"workers"`     // Worker配置
-	DNS        DNSConfig     `yaml:"dns"`         // DNS配置
-	RulesPath  string        `yaml:"rules_path"`  // 过滤规则路径
-	Metrics    MetricsConfig `yaml:"metrics"`     // 监控配置
-	Logging    LoggingConfig `yaml:"logging"`     // 日志配置
+	Interface  string         `yaml:"interface"`   // 网络接口名
+	QueueStart int            `yaml:"queue_start"` // 起始队列ID
+	QueueCount int            `yaml:"queue_count"` // 队列数量 (多队列支持)
+	BPFPath    string         `yaml:"bpf_path"`    // BPF程序路径
+	XDP        XDPConfig      `yaml:"xdp"`         // XDP配置
+	Workers    WorkerConfig   `yaml:"workers"`     // Worker配置
+	DNS        DNSConfig      `yaml:"dns"`         // DNS配置
+	Response   ResponseConfig `yaml:"response"`    // 响应配置
+	RulesPath  string         `yaml:"rules_path"`  // 过滤规则路径
+	Metrics    MetricsConfig  `yaml:"metrics"`     // 监控配置
+	Logging    LoggingConfig  `yaml:"logging"`     // 日志配置
 }
 
 // XDPConfig AF_XDP Socket配置
 type XDPConfig struct {
-	NumFrames          int `yaml:"num_frames"`           // 帧数量
-	FrameSize          int `yaml:"frame_size"`           // 帧大小
-	FillRingNumDescs   int `yaml:"fill_ring_size"`       // Fill Ring大小
-	CompletionRingNumDescs int `yaml:"comp_ring_size"`   // Completion Ring大小
-	RxRingNumDescs     int `yaml:"rx_ring_size"`         // RX Ring大小
-	TxRingNumDescs     int `yaml:"tx_ring_size"`         // TX Ring大小
+	NumFrames              int  `yaml:"num_frames"`     // 帧数量
+	FrameSize              int  `yaml:"frame_size"`     // 帧大小
+	FillRingNumDescs       int  `yaml:"fill_ring_size"` // Fill Ring大小
+	CompletionRingNumDescs int  `yaml:"comp_ring_size"` // Completion Ring大小
+	RxRingNumDescs         int  `yaml:"rx_ring_size"`   // RX Ring大小
+	TxRingNumDescs         int  `yaml:"tx_ring_size"`   // TX Ring大小
+	ZeroCopy               bool `yaml:"zero_copy"`      // 是否使用零拷贝模式
 }
 
 // WorkerConfig Worker配置
 type WorkerConfig struct {
-	NumWorkers int `yaml:"num_workers"` // Worker数量, 0表示使用CPU核心数
-	BatchSize  int `yaml:"batch_size"`  // 批处理大小
+	NumWorkers      int `yaml:"num_workers"`       // Worker数量, 0表示使用CPU核心数
+	BatchSize       int `yaml:"batch_size"`        // 批处理大小
+	WorkersPerQueue int `yaml:"workers_per_queue"` // 每个队列的worker数量
 }
 
 // DNSConfig DNS配置
@@ -44,6 +47,13 @@ type DNSConfig struct {
 	UpstreamServers []string      `yaml:"upstream_servers"` // 上游DNS服务器
 	CacheSize       int           `yaml:"cache_size"`       // 缓存大小
 	CacheTTL        time.Duration `yaml:"cache_ttl"`        // 缓存TTL
+}
+
+// ResponseConfig 响应配置
+type ResponseConfig struct {
+	Enabled       bool `yaml:"enabled"`        // 是否启用响应发送
+	BlockResponse bool `yaml:"block_response"` // 是否对阻止的请求发送响应
+	NXDomain      bool `yaml:"nxdomain"`       // 对阻止的请求返回 NXDOMAIN
 }
 
 // MetricsConfig 监控配置
@@ -64,26 +74,33 @@ type LoggingConfig struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Interface:  "eth0",
-		QueueID:    0,
+		QueueStart: 0,
 		QueueCount: 1,
 		BPFPath:    "bpf/xdp_dns_filter_bpfel.o",
 		XDP: XDPConfig{
-			NumFrames:          4096,
-			FrameSize:          2048,
-			FillRingNumDescs:   2048,
+			NumFrames:              4096,
+			FrameSize:              2048,
+			FillRingNumDescs:       2048,
 			CompletionRingNumDescs: 2048,
-			RxRingNumDescs:     2048,
-			TxRingNumDescs:     2048,
+			RxRingNumDescs:         2048,
+			TxRingNumDescs:         2048,
+			ZeroCopy:               false,
 		},
 		Workers: WorkerConfig{
-			NumWorkers: 0, // 使用CPU核心数
-			BatchSize:  64,
+			NumWorkers:      0, // 使用CPU核心数
+			BatchSize:       64,
+			WorkersPerQueue: 2,
 		},
 		DNS: DNSConfig{
 			ListenPorts:     []uint16{53},
 			UpstreamServers: []string{"8.8.8.8:53", "8.8.4.4:53"},
 			CacheSize:       10000,
 			CacheTTL:        5 * time.Minute,
+		},
+		Response: ResponseConfig{
+			Enabled:       true,
+			BlockResponse: true,
+			NXDomain:      true,
 		},
 		RulesPath: "configs/rules.yaml",
 		Metrics: MetricsConfig{
@@ -153,4 +170,3 @@ func (c *Config) Save(path string) error {
 
 	return nil
 }
-

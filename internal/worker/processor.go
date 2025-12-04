@@ -102,11 +102,19 @@ func extractDNSPayload(data []byte) ([]byte, *PacketInfo, error) {
 	return data[dnsOffset:dnsEnd], info, nil
 }
 
-// handleAction 处理检测动作
-// 威胁流量分析系统只记录和统计，不构建响应
-func (p *Pool) handleAction(msg *dns.Message, action filter.Action,
+// handleActionWithResponse 处理检测动作并可选发送响应
+func (p *Pool) handleActionWithResponse(pkt Packet, msg *dns.Message, action filter.Action,
 	rule *filter.Rule, pktInfo *PacketInfo, metricsCollector *metrics.Collector) {
 
+	// 先尝试使用自定义响应处理器
+	if p.options.ResponseHandler != nil {
+		if dnsResp, shouldSend := p.options.ResponseHandler(msg, action, rule, pktInfo); shouldSend && dnsResp != nil {
+			p.sendResponse(pkt, dnsResp, pktInfo)
+			return
+		}
+	}
+
+	// 默认处理逻辑
 	switch action {
 	case filter.ActionAllow:
 		// 正常流量 - 仅统计
@@ -115,7 +123,7 @@ func (p *Pool) handleAction(msg *dns.Message, action filter.Action,
 		}
 
 	case filter.ActionBlock:
-		// 威胁流量 - 记录并统计
+		// 威胁流量 - 记录并可选发送拒绝响应
 		if metricsCollector != nil {
 			metricsCollector.IncBlocked()
 		}
@@ -123,6 +131,14 @@ func (p *Pool) handleAction(msg *dns.Message, action filter.Action,
 			log.Printf("THREAT DETECTED: domain=%s rule=%s src=%s type=%s",
 				msg.GetQueryDomain(), rule.ID, pktInfo.SrcIP,
 				dns.TypeName(msg.GetQueryType()))
+		}
+
+		// 如果配置了发送阻止响应
+		if p.options.ResponseConfig != nil && p.options.ResponseConfig.BlockResponse {
+			dnsResp := buildBlockResponse(msg, p.options.ResponseConfig.NXDomain)
+			if dnsResp != nil {
+				p.sendResponse(pkt, dnsResp, pktInfo)
+			}
 		}
 
 	case filter.ActionLog:

@@ -2,13 +2,15 @@
 
 # 网络接口配置
 interface: eth0
-queue_id: 0
-queue_count: 4
+
+# 多队列配置
+queue_start: 0      # 起始队列 ID
+queue_count: 4      # 使用的队列数量 (支持多 RX 队列)
 
 # BPF 程序路径
 bpf_path: bpf/xdp_dns_filter_bpfel.o
 
-# AF_XDP Socket 配置
+# AF_XDP Socket 配置 (每个队列的配置)
 xdp:
   num_frames: 4096
   frame_size: 2048
@@ -16,10 +18,12 @@ xdp:
   comp_ring_size: 2048
   rx_ring_size: 2048
   tx_ring_size: 2048
+  zero_copy: false    # 是否使用零拷贝模式
 
 # Worker 配置
 workers:
-  num_workers: 8      # 0 表示使用 CPU 核心数
+  num_workers: 0         # 0 表示使用 CPU 核心数
+  workers_per_queue: 2   # 每个队列的 worker 数量
   batch_size: 64
 
 # DNS 配置
@@ -32,6 +36,12 @@ dns:
     - 8.8.4.4:53
   cache_size: 10000
   cache_ttl: 300s
+
+# 响应配置
+response:
+  enabled: true         # 是否启用响应发送
+  block_response: true  # 对阻止的请求是否发送响应
+  nxdomain: true        # 返回 NXDOMAIN (true) 或 REFUSED (false)
 
 # 过滤规则配置
 rules_path: configs/rules.yaml

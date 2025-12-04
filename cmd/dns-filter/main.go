@@ -81,7 +81,6 @@ func main() {
 		log.Fatalf("Failed to set DNS ports: %v", err)
 	}
 	log.Printf("DNS ports configured: %v", dnsPorts)
-	log.Printf("NOTE: Only UDP traffic to these ports will be intercepted. SSH and other traffic will PASS through.")
 
 	// 附加 XDP 程序到接口
 	if err := program.Attach(ifindex); err != nil {
@@ -91,7 +90,7 @@ func main() {
 
 	log.Printf("XDP program attached to %s", cfg.Interface)
 
-	// 创建 AF_XDP Socket
+	// 创建 Socket 配置
 	socketOpts := &xdp.SocketOptions{
 		NumFrames:              cfg.XDP.NumFrames,
 		FrameSize:              cfg.XDP.FrameSize,
@@ -101,27 +100,20 @@ func main() {
 		TxRingNumDescs:         cfg.XDP.TxRingNumDescs,
 	}
 
-	socket, err := xdp.NewSocket(ifindex, cfg.QueueID, socketOpts)
+	// 创建多队列管理器
+	queueManager, err := xdp.NewQueueManager(xdp.QueueManagerConfig{
+		Ifindex:    ifindex,
+		QueueStart: cfg.QueueStart,
+		QueueCount: cfg.QueueCount,
+		SocketOpts: socketOpts,
+	}, program)
 	if err != nil {
-		log.Fatalf("Failed to create XDP socket: %v", err)
+		log.Fatalf("Failed to create queue manager: %v", err)
 	}
-	defer socket.Close()
+	defer queueManager.Close()
 
-	// 注册 socket 到 XDP 程序
-	log.Printf("Registering socket FD=%d to queue %d...", socket.FD(), cfg.QueueID)
-	if err := program.Register(cfg.QueueID, socket.FD()); err != nil {
-		log.Fatalf("Failed to register socket: %v", err)
-	}
-
-	log.Printf("XDP socket created and registered (queue=%d, fd=%d)", cfg.QueueID, socket.FD())
-
-	// 验证注册是否成功
-	if program.Queues != nil {
-		var val uint32
-		if err := program.Queues.Lookup(uint32(cfg.QueueID), &val); err == nil {
-			log.Printf("Verification: qidconf_map[%d] = %d", cfg.QueueID, val)
-		}
-	}
+	log.Printf("Multi-queue XDP sockets created: queues %d-%d (%d total)",
+		cfg.QueueStart, cfg.QueueStart+cfg.QueueCount-1, cfg.QueueCount)
 
 	// 初始化过滤引擎
 	filterEngine, err := filter.NewEngine(cfg.RulesPath)
@@ -132,12 +124,14 @@ func main() {
 
 	// 创建 Worker 池
 	workerPool := worker.NewPool(worker.PoolOptions{
-		NumWorkers:   cfg.Workers.NumWorkers,
-		BatchSize:    cfg.Workers.BatchSize,
-		Socket:       socket,
-		FilterEngine: filterEngine,
-		DNSParser:    dns.NewParser(),
-		Metrics:      metricsCollector,
+		NumWorkers:      cfg.Workers.NumWorkers,
+		WorkersPerQueue: cfg.Workers.WorkersPerQueue,
+		BatchSize:       cfg.Workers.BatchSize,
+		QueueManager:    queueManager,
+		FilterEngine:    filterEngine,
+		DNSParser:       dns.NewParser(),
+		Metrics:         metricsCollector,
+		ResponseConfig:  &cfg.Response,
 	})
 
 	// 启动上下文
@@ -157,7 +151,17 @@ func main() {
 
 	// 启动 Worker 池
 	go workerPool.Start(ctx)
-	log.Printf("Worker pool started with %d workers", cfg.Workers.NumWorkers)
+	log.Printf("Worker pool started with %d workers for %d queues",
+		cfg.Workers.NumWorkers, cfg.QueueCount)
+
+	// 打印配置摘要
+	log.Printf("=== Configuration Summary ===")
+	log.Printf("  Interface: %s", cfg.Interface)
+	log.Printf("  Queues: %d-%d (%d total)", cfg.QueueStart, cfg.QueueStart+cfg.QueueCount-1, cfg.QueueCount)
+	log.Printf("  DNS Ports: %v", dnsPorts)
+	log.Printf("  Response enabled: %v", cfg.Response.Enabled)
+	log.Printf("  Block response: %v (NXDOMAIN: %v)", cfg.Response.BlockResponse, cfg.Response.NXDomain)
+	log.Printf("=============================")
 
 	// 等待信号
 	sigCh := make(chan os.Signal, 1)
@@ -176,5 +180,5 @@ func main() {
 	log.Printf("Final stats: received=%d, allowed=%d (normal), blocked=%d (threat), logged=%d (suspicious), dropped=%d",
 		stats.Received, stats.Allowed, stats.Blocked, stats.Logged, stats.Dropped)
 
-	log.Println("XDP DNS Threat Analyzer stopped.")
+	log.Println("XDP DNS Filter stopped.")
 }

@@ -11,7 +11,7 @@ import (
 	"xdp-dns/pkg/metrics"
 )
 
-// Pool Worker 处理池
+// Pool 多队列 Worker 处理池
 type Pool struct {
 	options PoolOptions
 	packets chan Packet
@@ -22,16 +22,30 @@ type Pool struct {
 
 // NewPool 创建新的 Worker 池
 func NewPool(opts PoolOptions) *Pool {
-	if opts.NumWorkers <= 0 {
-		opts.NumWorkers = runtime.NumCPU()
+	numWorkers := opts.NumWorkers
+	if numWorkers <= 0 {
+		numWorkers = runtime.NumCPU()
 	}
 	if opts.BatchSize <= 0 {
 		opts.BatchSize = 64
 	}
+	if opts.WorkersPerQueue <= 0 {
+		opts.WorkersPerQueue = 2
+	}
+
+	// 如果有队列管理器，根据队列数量调整 worker 数
+	if opts.QueueManager != nil {
+		queueCount := opts.QueueManager.QueueCount()
+		if numWorkers < queueCount*opts.WorkersPerQueue {
+			numWorkers = queueCount * opts.WorkersPerQueue
+		}
+	}
+
+	opts.NumWorkers = numWorkers
 
 	return &Pool{
 		options: opts,
-		packets: make(chan Packet, opts.NumWorkers*1024),
+		packets: make(chan Packet, numWorkers*1024),
 	}
 }
 
@@ -51,57 +65,53 @@ func (p *Pool) Start(ctx context.Context) {
 		go p.worker(ctx, i)
 	}
 
-	// 启动 receiver
-	p.wg.Add(1)
-	go p.receiver(ctx)
+	// 启动 receiver (从队列管理器接收)
+	if p.options.QueueManager != nil {
+		p.wg.Add(1)
+		go p.multiQueueReceiver(ctx)
+	}
+
+	log.Printf("Worker pool started: %d workers for %d queues",
+		p.options.NumWorkers, p.options.QueueManager.QueueCount())
 }
 
-// receiver 接收数据包
-func (p *Pool) receiver(ctx context.Context) {
+// multiQueueReceiver 从多队列管理器接收数据包
+func (p *Pool) multiQueueReceiver(ctx context.Context) {
 	defer p.wg.Done()
 
-	socket := p.options.Socket
-	if socket == nil {
-		log.Println("Worker pool: socket is nil")
+	qm := p.options.QueueManager
+	if qm == nil {
+		log.Println("Worker pool: queue manager is nil")
 		return
 	}
+
+	// 启动队列管理器的接收器
+	rxPackets := qm.StartReceiver(ctx, p.options.BatchSize)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		default:
-		}
-
-		// 填充 Fill Ring
-		descs := socket.GetDescs(socket.NumFreeFillSlots(), true)
-		if len(descs) > 0 {
-			socket.Fill(descs)
-		}
-
-		// 轮询接收
-		numRx, _, err := socket.Poll(100) // 100ms 超时
-		if err != nil {
-			log.Printf("Poll error: %v", err)
-			continue
-		}
-
-		if numRx == 0 {
-			continue
-		}
-
-		// 分发到 workers
-		rxDescs := socket.Receive(numRx)
-		for _, desc := range rxDescs {
-			pkt := Packet{
-				Desc: desc,
-				Data: socket.GetFrame(desc),
+		case rxPkt, ok := <-rxPackets:
+			if !ok {
+				return
 			}
+
+			// 转换为 worker Packet
+			pkt := Packet{
+				QueueID:  rxPkt.QueueID,
+				Desc:     rxPkt.Desc,
+				Data:     rxPkt.Data,
+				Socket:   rxPkt.Socket,
+				OrigData: make([]byte, len(rxPkt.Data)),
+			}
+			// 复制原始数据用于构建响应
+			copy(pkt.OrigData, rxPkt.Data)
 
 			select {
 			case p.packets <- pkt:
 			default:
-				// 队列满，丢弃包
+				// 队列满，丢弃
 				if p.options.Metrics != nil {
 					p.options.Metrics.IncDropped()
 				}
@@ -161,14 +171,14 @@ func (p *Pool) processPacket(pkt Packet, parser *dns.Parser,
 	}
 
 	// 过滤检查
-	if engine == nil {
-		return
+	var action filter.Action = filter.ActionAllow
+	var rule *filter.Rule
+	if engine != nil {
+		action, rule = engine.Check(msg, pktInfo.SrcIP)
 	}
 
-	action, rule := engine.Check(msg, pktInfo.SrcIP)
-
-	// 处理检测结果 (威胁分析只记录，不响应)
-	p.handleAction(msg, action, rule, pktInfo, metricsCollector)
+	// 处理动作并可能发送响应
+	p.handleActionWithResponse(pkt, msg, action, rule, pktInfo, metricsCollector)
 }
 
 // Wait 等待所有 worker 完成

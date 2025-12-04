@@ -62,7 +62,7 @@ echo -e "  ${GREEN}✓${NC} 网络环境就绪"
 echo -e "${BLUE}[2/6] 创建配置文件...${NC}"
 cat > "$LOG_DIR/config.yaml" << EOF
 interface: veth_xdp
-queue_id: 0
+queue_start: 0
 queue_count: 1
 bpf_path: ${PROJECT_ROOT}/bpf/xdp_dns_filter_bpfel.o
 rules_path: ${PROJECT_ROOT}/configs/rules.yaml
@@ -75,10 +75,15 @@ xdp:
   tx_ring_size: 2048
 workers:
   num_workers: 2
+  workers_per_queue: 2
   batch_size: 32
 dns:
   listen_ports:
     - 53
+response:
+  enabled: true
+  block_response: true
+  nxdomain: true
 metrics:
   enabled: true
   listen: ":9095"
