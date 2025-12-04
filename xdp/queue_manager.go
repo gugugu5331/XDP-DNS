@@ -5,6 +5,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -25,15 +29,66 @@ type QueueManager struct {
 type QueueManagerConfig struct {
 	Ifindex    int            // 网卡索引
 	QueueStart int            // 起始队列 ID
-	QueueCount int            // 队列数量
+	QueueCount int            // 队列数量 (0 = 自动检测)
 	SocketOpts *SocketOptions // Socket 配置
 }
 
-// NewQueueManager 创建多队列管理器
-func NewQueueManager(cfg QueueManagerConfig, program *Program) (*QueueManager, error) {
-	if cfg.QueueCount <= 0 {
-		cfg.QueueCount = 1
+// getInterfaceQueueCount 获取网卡支持的 RX 队列数量
+func getInterfaceQueueCount(ifindex int) int {
+	// 通过 sysfs 查找接口名
+	netDir := "/sys/class/net"
+	entries, err := os.ReadDir(netDir)
+	if err != nil {
+		return 1
 	}
+
+	for _, entry := range entries {
+		ifPath := filepath.Join(netDir, entry.Name(), "ifindex")
+		data, err := os.ReadFile(ifPath)
+		if err != nil {
+			continue
+		}
+		idx, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err != nil || idx != ifindex {
+			continue
+		}
+
+		// 找到接口，读取队列数
+		queuesDir := filepath.Join(netDir, entry.Name(), "queues")
+		queueEntries, err := os.ReadDir(queuesDir)
+		if err != nil {
+			return 1
+		}
+
+		rxCount := 0
+		for _, qe := range queueEntries {
+			if strings.HasPrefix(qe.Name(), "rx-") {
+				rxCount++
+			}
+		}
+		if rxCount > 0 {
+			return rxCount
+		}
+	}
+	return 1
+}
+
+// NewQueueManager 创建多队列管理器
+// 如果请求的队列数超过网卡支持的数量，会自动回退到支持的最大数量
+func NewQueueManager(cfg QueueManagerConfig, program *Program) (*QueueManager, error) {
+	// 检测网卡支持的队列数
+	maxQueues := getInterfaceQueueCount(cfg.Ifindex)
+
+	// 确定实际使用的队列数
+	actualQueueCount := cfg.QueueCount
+	if actualQueueCount <= 0 {
+		actualQueueCount = maxQueues
+	} else if actualQueueCount > maxQueues {
+		log.Printf("Warning: requested %d queues, but interface only supports %d. Using %d queues.",
+			cfg.QueueCount, maxQueues, maxQueues)
+		actualQueueCount = maxQueues
+	}
+
 	if cfg.SocketOpts == nil {
 		cfg.SocketOpts = &DefaultSocketOptions
 	}
@@ -42,28 +97,50 @@ func NewQueueManager(cfg QueueManagerConfig, program *Program) (*QueueManager, e
 		ifindex:    cfg.Ifindex,
 		program:    program,
 		queueStart: cfg.QueueStart,
-		queueCount: cfg.QueueCount,
+		queueCount: actualQueueCount,
 		opts:       cfg.SocketOpts,
-		sockets:    make([]*Socket, cfg.QueueCount),
+		sockets:    make([]*Socket, actualQueueCount),
 	}
 
-	// 为每个队列创建 Socket
-	for i := 0; i < cfg.QueueCount; i++ {
+	// 尝试创建队列，如果失败则回退
+	successCount := 0
+	for i := 0; i < actualQueueCount; i++ {
 		queueID := cfg.QueueStart + i
 		socket, err := NewSocket(cfg.Ifindex, queueID, cfg.SocketOpts)
 		if err != nil {
-			// 清理已创建的 sockets
-			qm.Close()
-			return nil, fmt.Errorf("failed to create socket for queue %d: %w", queueID, err)
+			if i == 0 {
+				// 第一个队列就失败，说明有严重问题
+				return nil, fmt.Errorf("failed to create socket for queue %d: %w", queueID, err)
+			}
+			// 后续队列失败，使用已成功创建的队列
+			log.Printf("Warning: failed to create socket for queue %d: %v. Using %d queue(s).",
+				queueID, err, i)
+			break
 		}
 		qm.sockets[i] = socket
+		successCount++
 
 		// 注册到 XDP 程序
 		if err := program.Register(queueID, socket.FD()); err != nil {
-			qm.Close()
-			return nil, fmt.Errorf("failed to register socket for queue %d: %w", queueID, err)
+			socket.Close()
+			if i == 0 {
+				return nil, fmt.Errorf("failed to register socket for queue %d: %w", queueID, err)
+			}
+			log.Printf("Warning: failed to register socket for queue %d: %v. Using %d queue(s).",
+				queueID, err, i)
+			break
 		}
 		log.Printf("Queue %d: socket created and registered (fd=%d)", queueID, socket.FD())
+	}
+
+	// 调整实际队列数
+	if successCount < actualQueueCount {
+		qm.queueCount = successCount
+		qm.sockets = qm.sockets[:successCount]
+	}
+
+	if qm.queueCount == 0 {
+		return nil, fmt.Errorf("no queues could be created")
 	}
 
 	return qm, nil
@@ -128,9 +205,9 @@ func (qm *QueueManager) Close() error {
 
 // ReceivedPacket 表示从队列接收到的数据包
 type ReceivedPacket struct {
-	QueueID int    // 来源队列 ID
-	Desc    Desc   // XDP 描述符
-	Data    []byte // 数据包内容 (指向 UMEM)
+	QueueID int     // 来源队列 ID
+	Desc    Desc    // XDP 描述符
+	Data    []byte  // 数据包内容 (指向 UMEM)
 	Socket  *Socket // 所属的 Socket (用于发送响应)
 }
 
@@ -200,4 +277,3 @@ func (qm *QueueManager) receiveLoop(ctx context.Context, queueID int, socket *So
 		}
 	}
 }
-

@@ -69,10 +69,11 @@ func (p *Pool) Start(ctx context.Context) {
 	if p.options.QueueManager != nil {
 		p.wg.Add(1)
 		go p.multiQueueReceiver(ctx)
+		log.Printf("Worker pool started: %d workers for %d queues",
+			p.options.NumWorkers, p.options.QueueManager.QueueCount())
+	} else {
+		log.Printf("Worker pool started: %d workers (no queue manager)", p.options.NumWorkers)
 	}
-
-	log.Printf("Worker pool started: %d workers for %d queues",
-		p.options.NumWorkers, p.options.QueueManager.QueueCount())
 }
 
 // multiQueueReceiver 从多队列管理器接收数据包

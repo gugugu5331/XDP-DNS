@@ -166,6 +166,39 @@ func buildBlockResponse(query *dns.Message, nxdomain bool) []byte {
 	return resp
 }
 
+// buildEchoResponse 构建回显响应（用于测试，返回 NOERROR 无记录）
+func buildEchoResponse(query *dns.Message) []byte {
+	if query == nil || len(query.RawData) < 12 {
+		return nil
+	}
+
+	// 复制原始查询
+	resp := make([]byte, len(query.RawData))
+	copy(resp, query.RawData)
+
+	// 设置响应标志
+	// QR=1 (响应), OPCODE=0, AA=0, TC=0, RD=原值, RA=1, RCODE=0 (NOERROR)
+	flags := uint16(0x8080) // QR=1, RA=1, RCODE=0
+	// 保留 RD 位
+	if query.RawData[2]&0x01 != 0 {
+		flags |= 0x0100
+	}
+	resp[2] = byte(flags >> 8)
+	resp[3] = byte(flags)
+
+	// QDCOUNT=1, ANCOUNT=0, NSCOUNT=0, ARCOUNT=0
+	resp[4] = 0
+	resp[5] = 1
+	resp[6] = 0
+	resp[7] = 0
+	resp[8] = 0
+	resp[9] = 0
+	resp[10] = 0
+	resp[11] = 0
+
+	return resp
+}
+
 // ipv4Checksum 计算 IPv4 头部校验和
 func ipv4Checksum(header []byte) uint16 {
 	var sum uint32
