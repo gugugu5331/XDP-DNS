@@ -140,7 +140,7 @@ func (p *Pool) handleActionWithResponse(pkt Packet, msg *dns.Message, action fil
 		if metricsCollector != nil {
 			metricsCollector.IncBlocked()
 		}
-		if rule != nil {
+		if rule != nil && !p.options.DisableLog {
 			log.Printf("THREAT DETECTED: domain=%s rule=%s src=%s type=%s",
 				msg.GetQueryDomain(), rule.ID, pktInfo.SrcIP,
 				dns.TypeName(msg.GetQueryType()))
@@ -156,11 +156,13 @@ func (p *Pool) handleActionWithResponse(pkt Packet, msg *dns.Message, action fil
 
 	case filter.ActionLog:
 		// 可疑流量 - 记录详细信息
-		log.Printf("SUSPICIOUS: domain=%s src=%s:%d dst=%s:%d type=%s",
-			msg.GetQueryDomain(),
-			pktInfo.SrcIP, pktInfo.SrcPort,
-			pktInfo.DstIP, pktInfo.DstPort,
-			dns.TypeName(msg.GetQueryType()))
+		if !p.options.DisableLog {
+			log.Printf("SUSPICIOUS: domain=%s src=%s:%d dst=%s:%d type=%s",
+				msg.GetQueryDomain(),
+				pktInfo.SrcIP, pktInfo.SrcPort,
+				pktInfo.DstIP, pktInfo.DstPort,
+				dns.TypeName(msg.GetQueryType()))
+		}
 		if metricsCollector != nil {
 			metricsCollector.IncLogged()
 		}

@@ -1,0 +1,64 @@
+# XDP DNS Filter 性能测试配置
+# 用于基准测试，关闭所有不必要的日志输出
+
+# 网络接口配置
+interface: eth0
+
+# 单队列配置 (用于测试单核性能)
+queue_start: 0
+queue_count: 1      # 单队列
+
+# BPF 程序路径
+bpf_path: bpf/xdp_dns_filter_bpfel.o
+
+# AF_XDP Socket 配置
+xdp:
+  num_frames: 4096
+  frame_size: 2048
+  fill_ring_size: 2048
+  comp_ring_size: 2048
+  rx_ring_size: 2048
+  tx_ring_size: 2048
+  zero_copy: false
+
+# Worker 配置 - 单核测试
+workers:
+  num_workers: 1        # 单 worker
+  workers_per_queue: 1
+  batch_size: 64
+
+# DNS 配置
+dns:
+  listen_ports:
+    - 53
+
+# 响应配置 - 用于测试需要响应
+response:
+  enabled: true
+  mode: "all"           # 所有请求都响应，便于 dnsperf 统计
+  block_response: true
+  nxdomain: true
+
+# 过滤规则
+rules_path: configs/rules.yaml
+
+# 监控 - 可选关闭以减少开销
+metrics:
+  enabled: false        # 关闭 metrics 减少开销
+  listen: ":9090"
+  path: /metrics
+
+# 日志 - 完全关闭
+logging:
+  enabled: false        # 关闭日志
+  level: error
+  format: text
+  output: stdout
+
+# 性能调优 - 极限模式
+performance:
+  single_core: true     # 单核模式
+  cpu_affinity: 0       # 绑定到 CPU 0
+  busy_poll: false
+  disable_log: true     # 禁用所有日志
+

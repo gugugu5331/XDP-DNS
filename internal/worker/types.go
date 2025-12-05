@@ -27,6 +27,7 @@ type PoolOptions struct {
 	DNSParser       *dns.Parser            // DNS解析器
 	Metrics         *metrics.Collector     // 指标收集器
 	ResponseConfig  *config.ResponseConfig // 响应配置
+	DisableLog      bool                   // 禁用日志输出 (性能模式)
 
 	// 响应处理回调 (可选)
 	// 返回 nil 表示不发送响应

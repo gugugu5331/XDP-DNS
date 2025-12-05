@@ -55,7 +55,14 @@ metrics:
 
 # 日志配置
 logging:
-  level: info
-  format: json
-  output: stdout
+  enabled: true     # 是否启用日志 (false = 完全关闭)
+  level: info       # 日志级别: debug, info, warn, error
+  format: text      # 日志格式: json, text
+  output: stdout    # 输出: stdout, stderr, 或文件路径
 
+# 性能调优配置 (用于测试)
+performance:
+  single_core: false    # 单核模式 (仅使用1个队列，用于性能基准测试)
+  cpu_affinity: -1      # CPU 亲和性 (-1 = 不设置，0-N = 绑定到指定核心)
+  busy_poll: false      # 忙轮询模式 (降低延迟但增加CPU使用)
+  disable_log: false    # 禁用所有日志输出 (用于极限性能测试)

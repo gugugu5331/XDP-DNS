@@ -10,17 +10,18 @@ import (
 
 // Config 主配置结构
 type Config struct {
-	Interface  string         `yaml:"interface"`   // 网络接口名
-	QueueStart int            `yaml:"queue_start"` // 起始队列ID
-	QueueCount int            `yaml:"queue_count"` // 队列数量 (多队列支持)
-	BPFPath    string         `yaml:"bpf_path"`    // BPF程序路径
-	XDP        XDPConfig      `yaml:"xdp"`         // XDP配置
-	Workers    WorkerConfig   `yaml:"workers"`     // Worker配置
-	DNS        DNSConfig      `yaml:"dns"`         // DNS配置
-	Response   ResponseConfig `yaml:"response"`    // 响应配置
-	RulesPath  string         `yaml:"rules_path"`  // 过滤规则路径
-	Metrics    MetricsConfig  `yaml:"metrics"`     // 监控配置
-	Logging    LoggingConfig  `yaml:"logging"`     // 日志配置
+	Interface   string            `yaml:"interface"`   // 网络接口名
+	QueueStart  int               `yaml:"queue_start"` // 起始队列ID
+	QueueCount  int               `yaml:"queue_count"` // 队列数量 (多队列支持)
+	BPFPath     string            `yaml:"bpf_path"`    // BPF程序路径
+	XDP         XDPConfig         `yaml:"xdp"`         // XDP配置
+	Workers     WorkerConfig      `yaml:"workers"`     // Worker配置
+	DNS         DNSConfig         `yaml:"dns"`         // DNS配置
+	Response    ResponseConfig    `yaml:"response"`    // 响应配置
+	RulesPath   string            `yaml:"rules_path"`  // 过滤规则路径
+	Metrics     MetricsConfig     `yaml:"metrics"`     // 监控配置
+	Logging     LoggingConfig     `yaml:"logging"`     // 日志配置
+	Performance PerformanceConfig `yaml:"performance"` // 性能调优配置
 }
 
 // XDPConfig AF_XDP Socket配置
@@ -66,9 +67,18 @@ type MetricsConfig struct {
 
 // LoggingConfig 日志配置
 type LoggingConfig struct {
-	Level  string `yaml:"level"`  // 日志级别
-	Format string `yaml:"format"` // 日志格式
-	Output string `yaml:"output"` // 输出路径
+	Level   string `yaml:"level"`   // 日志级别: debug, info, warn, error, off
+	Format  string `yaml:"format"`  // 日志格式: json, text
+	Output  string `yaml:"output"`  // 输出路径: stdout, stderr, 或文件路径
+	Enabled bool   `yaml:"enabled"` // 是否启用日志 (false = 完全关闭)
+}
+
+// PerformanceConfig 性能调优配置
+type PerformanceConfig struct {
+	SingleCore  bool `yaml:"single_core"`  // 单核模式 (用于性能测试)
+	CPUAffinity int  `yaml:"cpu_affinity"` // CPU 亲和性 (-1 = 不设置)
+	BusyPoll    bool `yaml:"busy_poll"`    // 忙轮询模式
+	DisableLog  bool `yaml:"disable_log"`  // 禁用所有日志 (最高性能)
 }
 
 // DefaultConfig 返回默认配置
@@ -111,9 +121,16 @@ func DefaultConfig() *Config {
 			Path:    "/metrics",
 		},
 		Logging: LoggingConfig{
-			Level:  "info",
-			Format: "json",
-			Output: "stdout",
+			Level:   "info",
+			Format:  "json",
+			Output:  "stdout",
+			Enabled: true,
+		},
+		Performance: PerformanceConfig{
+			SingleCore:  false,
+			CPUAffinity: -1, // 不设置
+			BusyPoll:    false,
+			DisableLog:  false,
 		},
 	}
 }
