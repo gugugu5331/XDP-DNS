@@ -35,7 +35,7 @@ var (
 	logEnabled = true
 )
 
-func logPrintf(format string, v ...interface{}) {
+func logPrintf(format string, v ...any) {
 	if logEnabled {
 		log.Printf(format, v...)
 	}
@@ -51,28 +51,26 @@ func setCPUAffinity(cpu int) error {
 
 // applyPerformanceConfig 应用性能配置
 func applyPerformanceConfig(cfg *config.Config) {
-	// 禁用日志
-	if cfg.Performance.DisableLog || !cfg.Logging.Enabled {
-		logEnabled = false
-		log.SetOutput(io.Discard)
-		log.Printf("Logging disabled for maximum performance")
-	}
-
 	// 单核模式
 	if cfg.Performance.SingleCore {
 		runtime.GOMAXPROCS(1)
-		if logEnabled {
-			log.Printf("Single-core mode: GOMAXPROCS set to 1")
-		}
+		fmt.Println("[PERF] Single-core mode: GOMAXPROCS set to 1")
 	}
 
 	// CPU 亲和性
 	if cfg.Performance.CPUAffinity >= 0 {
 		if err := setCPUAffinity(cfg.Performance.CPUAffinity); err != nil {
-			log.Printf("Warning: failed to set CPU affinity to %d: %v", cfg.Performance.CPUAffinity, err)
-		} else if logEnabled {
-			log.Printf("CPU affinity set to core %d", cfg.Performance.CPUAffinity)
+			fmt.Printf("[PERF] Warning: failed to set CPU affinity to %d: %v\n", cfg.Performance.CPUAffinity, err)
+		} else {
+			fmt.Printf("[PERF] CPU affinity set to core %d\n", cfg.Performance.CPUAffinity)
 		}
+	}
+
+	// 禁用日志 (最后执行，让启动信息能输出)
+	if cfg.Performance.DisableLog || !cfg.Logging.Enabled {
+		logEnabled = false
+		fmt.Println("[PERF] Logging disabled for maximum performance")
+		log.SetOutput(io.Discard)
 	}
 }
 
@@ -84,9 +82,10 @@ func main() {
 		os.Exit(0)
 	}
 
-	log.Printf("Starting XDP DNS Filter...")
+	fmt.Println("Starting XDP DNS Filter...")
 
 	// 加载配置
+	fmt.Println("[1/7] Loading configuration...")
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
@@ -99,13 +98,13 @@ func main() {
 	metricsCollector := metrics.NewCollector()
 
 	// 获取网络接口
+	fmt.Printf("[2/7] Getting interface %s...\n", cfg.Interface)
 	link, err := netlink.LinkByName(cfg.Interface)
 	if err != nil {
 		log.Fatalf("Failed to get interface %s: %v", cfg.Interface, err)
 	}
 	ifindex := link.Attrs().Index
-
-	logPrintf("Using interface: %s (index: %d)", cfg.Interface, ifindex)
+	fmt.Printf("      Interface %s (index: %d) ready\n", cfg.Interface, ifindex)
 
 	// 确定 BPF 程序路径
 	bpfProgPath := *bpfPath
@@ -117,12 +116,13 @@ func main() {
 	}
 
 	// 加载 XDP DNS 过滤程序
-	logPrintf("Loading XDP DNS filter program from: %s", bpfProgPath)
+	fmt.Printf("[3/7] Loading BPF program from: %s...\n", bpfProgPath)
 	program, err := xdp.LoadProgram(bpfProgPath)
 	if err != nil {
 		log.Fatalf("Failed to load XDP program: %v", err)
 	}
 	defer program.Close()
+	fmt.Println("      BPF program loaded")
 
 	// 设置 DNS 端口
 	dnsPorts := []uint16{53} // 默认只监听端口 53
@@ -132,15 +132,15 @@ func main() {
 	if err := program.SetDNSPorts(dnsPorts); err != nil {
 		log.Fatalf("Failed to set DNS ports: %v", err)
 	}
-	logPrintf("DNS ports configured: %v", dnsPorts)
+	fmt.Printf("      DNS ports: %v\n", dnsPorts)
 
 	// 附加 XDP 程序到接口
+	fmt.Printf("[4/7] Attaching XDP program to %s...\n", cfg.Interface)
 	if err := program.Attach(ifindex); err != nil {
 		log.Fatalf("Failed to attach XDP program: %v", err)
 	}
 	defer program.Detach(ifindex)
-
-	logPrintf("XDP program attached to %s", cfg.Interface)
+	fmt.Println("      XDP program attached")
 
 	// 创建 Socket 配置
 	socketOpts := &xdp.SocketOptions{
@@ -156,10 +156,10 @@ func main() {
 	queueCount := cfg.QueueCount
 	if cfg.Performance.SingleCore {
 		queueCount = 1
-		logPrintf("Single-core mode enabled, using 1 queue")
 	}
 
 	// 创建多队列管理器
+	fmt.Printf("[5/7] Creating AF_XDP sockets (queues: %d)...\n", queueCount)
 	queueManager, err := xdp.NewQueueManager(xdp.QueueManagerConfig{
 		Ifindex:    ifindex,
 		QueueStart: cfg.QueueStart,
@@ -170,18 +170,18 @@ func main() {
 		log.Fatalf("Failed to create queue manager: %v", err)
 	}
 	defer queueManager.Close()
-
-	logPrintf("Multi-queue XDP sockets created: queues %d-%d (%d total)",
-		cfg.QueueStart, cfg.QueueStart+queueCount-1, queueCount)
+	fmt.Printf("      Queues %d-%d created\n", cfg.QueueStart, cfg.QueueStart+queueCount-1)
 
 	// 初始化过滤引擎
+	fmt.Println("[6/7] Loading filter rules...")
 	filterEngine, err := filter.NewEngine(cfg.RulesPath)
 	if err != nil {
 		log.Fatalf("Failed to init filter engine: %v", err)
 	}
-	logPrintf("Filter engine initialized with %d rules", len(filterEngine.GetRules()))
+	fmt.Printf("      Loaded %d rules\n", len(filterEngine.GetRules()))
 
 	// 创建 Worker 池
+	fmt.Println("[7/7] Starting worker pool...")
 	workerPool := worker.NewPool(worker.PoolOptions{
 		NumWorkers:      cfg.Workers.NumWorkers,
 		WorkersPerQueue: cfg.Workers.WorkersPerQueue,
@@ -206,41 +206,42 @@ func main() {
 			}
 		}()
 		go exporter.StartUpdateLoop(ctx, 10*time.Second)
-		logPrintf("Metrics server started on %s%s", cfg.Metrics.Listen, cfg.Metrics.Path)
+		fmt.Printf("      Metrics: %s%s\n", cfg.Metrics.Listen, cfg.Metrics.Path)
 	}
 
 	// 启动 Worker 池
 	go workerPool.Start(ctx)
-	logPrintf("Worker pool started with %d workers for %d queues",
-		cfg.Workers.NumWorkers, queueCount)
+	fmt.Printf("      Workers: %d\n", cfg.Workers.NumWorkers)
 
 	// 打印配置摘要
-	logPrintf("=== Configuration Summary ===")
-	logPrintf("  Interface: %s", cfg.Interface)
-	logPrintf("  Queues: %d-%d (%d total)", cfg.QueueStart, cfg.QueueStart+queueCount-1, queueCount)
-	logPrintf("  DNS Ports: %v", dnsPorts)
-	logPrintf("  Response mode: %s", cfg.Response.Mode)
-	logPrintf("  Block response: %v (NXDOMAIN: %v)", cfg.Response.BlockResponse, cfg.Response.NXDomain)
-	logPrintf("  Performance: single_core=%v, cpu_affinity=%d, disable_log=%v",
+	fmt.Println("")
+	fmt.Println("=== XDP DNS Filter Ready ===")
+	fmt.Printf("  Interface:    %s\n", cfg.Interface)
+	fmt.Printf("  Queues:       %d-%d (%d total)\n", cfg.QueueStart, cfg.QueueStart+queueCount-1, queueCount)
+	fmt.Printf("  DNS Ports:    %v\n", dnsPorts)
+	fmt.Printf("  Response:     mode=%s, block=%v\n", cfg.Response.Mode, cfg.Response.BlockResponse)
+	fmt.Printf("  Performance:  single_core=%v, cpu=%d, no_log=%v\n",
 		cfg.Performance.SingleCore, cfg.Performance.CPUAffinity, cfg.Performance.DisableLog)
-	logPrintf("=============================")
+	fmt.Println("=============================")
 
 	// 等待信号
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	logPrintf("XDP DNS Filter is running. Press Ctrl+C to stop.")
+	fmt.Println("")
+	fmt.Println("XDP DNS Filter is running. Press Ctrl+C to stop.")
 
 	<-sigCh
-	log.Println("Shutting down...")
+	fmt.Println("")
+	fmt.Println("Shutting down...")
 
 	cancel()
 	workerPool.Wait()
 
 	// 打印统计信息 (始终输出)
 	stats := metricsCollector.GetStats()
-	log.Printf("Final stats: received=%d, allowed=%d (normal), blocked=%d (threat), logged=%d (suspicious), dropped=%d",
+	fmt.Printf("Final stats: received=%d, allowed=%d, blocked=%d, logged=%d, dropped=%d\n",
 		stats.Received, stats.Allowed, stats.Blocked, stats.Logged, stats.Dropped)
 
-	log.Println("XDP DNS Filter stopped.")
+	fmt.Println("XDP DNS Filter stopped.")
 }
